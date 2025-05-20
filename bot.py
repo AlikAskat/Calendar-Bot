@@ -11,7 +11,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 import calendar
 import logging
-import asyncio
 
 load_dotenv()
 
@@ -231,10 +230,7 @@ async def handle_callback(update: Update, context) -> None:
         user_data[chat_id]['month'] = month
         await show_calendar(chat_id, year, month, context)
 
-async def delete_webhook(application):
-    await application.bot.delete_webhook()
-
-async def async_main():
+def main():
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -248,20 +244,19 @@ async def async_main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     # Удаляем старый вебхук (если существует)
     try:
-        await delete_webhook(application)
+        application.bot.delete_webhook().result()
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
     # Получаем домен Render
     domain = os.getenv("RENDER_EXTERNAL_URL")
     if not domain:
         domain = "http://localhost:8000"
-    # Запускаем вебхук
-    await application.run_webhook(
+    application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
-        webhook_url=f"{domain}/{token}"
+        webhook_url=f"{domain}/{token}",
     )
 
 if __name__ == '__main__':
-    asyncio.run(async_main())
+    main()
