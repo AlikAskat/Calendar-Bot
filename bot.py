@@ -33,16 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Правильный список прав (SCOPES)
-SCOPES = ['https://www.googleapis.com/auth/calendar ']
+# Исправленный список прав (SCOPES)
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 user_data = {}
 
 def get_calendar_service():
     logger.info("Запрос сервиса Google Calendar")
     token_path = "token.pickle"
-    
+
     if not os.path.exists(token_path):
+        logger.error("Токен не найден. Выполните авторизацию через Google OAuth.")
         raise FileNotFoundError("Токен не найден. Выполните авторизацию.")
 
     with open(token_path, 'rb') as token_file:
@@ -91,12 +92,15 @@ async def restart(update: Update, context) -> None:
     await start(update, context)
 
 async def help_command(update: Update, context) -> None:
-    await update.message.reply_text("Чтобы добавить задачу, выберите \"Добавить задачу\" и следуйте инструкциям.")
+    await update.message.reply_text(
+        "Чтобы добавить задачу, выберите \"Добавить задачу\" и следуйте инструкциям. "
+        "Если что-то не работает — убедитесь, что вы авторизованы через Google OAuth и ваш токен валиден."
+    )
 
 def build_calendar(year, month):
     markup = []
     cal = calendar.Calendar()
-    
+
     # Дни недели
     markup.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
 
@@ -138,7 +142,11 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
     month_name = RU_MONTHS[month - 1].capitalize()
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
 
-    if 'calendar_message_id' in user_data.get(chat_id, {}):
+    # Гарантия, что user_data[chat_id] и его словарь инициализирован
+    if chat_id not in user_data:
+        user_data[chat_id] = {}
+
+    if 'calendar_message_id' in user_data[chat_id]:
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=user_data[chat_id]['calendar_message_id'],
@@ -185,8 +193,12 @@ async def handle_message(update: Update, context) -> None:
 async def handle_callback(update: Update, context) -> None:
     query = update.callback_query
     await query.answer()
-    chat_id = query.message.chat_id
+    chat_id = query.message.chat.id  # Исправлено на новый стиль
     data = query.data
+
+    # Гарантия, что user_data[chat_id] существует для данного пользователя
+    if chat_id not in user_data:
+        user_data[chat_id] = {}
 
     if data.startswith("day:"):
         _, date_str = data.split(":")
@@ -203,13 +215,21 @@ async def handle_callback(update: Update, context) -> None:
     elif data.startswith("minute:"):
         minute = int(data.split(":")[1])
         user_data[chat_id]['minute'] = minute
-        selected_date = user_data[chat_id]['date']
-        task = user_data[chat_id]['task']
+        selected_date = user_data[chat_id].get('date')
+        task = user_data[chat_id].get('task')
+        if selected_date is None or task is None or 'hour' not in user_data[chat_id]:
+            await query.message.reply_text("Ошибка: не все параметры выбраны. Попробуйте снова.")
+            user_data.pop(chat_id, None)
+            return
         start_datetime = selected_date.replace(hour=user_data[chat_id]['hour'], minute=minute)
         end_datetime = start_datetime + timedelta(minutes=30)
-        event_link = add_event_to_calendar(task, start_datetime, end_datetime)
-        await query.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
-        user_data.pop(chat_id)
+        try:
+            event_link = add_event_to_calendar(task, start_datetime, end_datetime)
+            await query.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
+        except Exception as e:
+            await query.message.reply_text("Ошибка при добавлении события в календарь Google. Проверьте авторизацию.")
+            logger.error(f"Ошибка при добавлении события: {e}")
+        user_data.pop(chat_id, None)
     elif data.startswith("prev:") or data.startswith("next:"):
         _, y, m = data.split(":")
         year, month = int(y), int(m)
