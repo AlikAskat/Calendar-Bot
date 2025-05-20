@@ -137,7 +137,6 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
 
     if 'calendar_message_id' in user_data.get(chat_id, {}):
-        # Редактируем старое сообщение
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=user_data[chat_id]['calendar_message_id'],
@@ -145,7 +144,6 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
             reply_markup=markup
         )
     else:
-        # Первый запуск — отправляем новое сообщение
         message = await context.bot.send_message(
             chat_id=chat_id,
             text=message_text,
