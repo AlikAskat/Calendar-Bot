@@ -231,7 +231,7 @@ async def handle_callback(update: Update, context) -> None:
 async def delete_webhook(application):
     await application.bot.delete_webhook()
 
-async def main():
+def main() -> None:
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -249,7 +249,7 @@ async def main():
 
     # Удаляем старый вебхук (если существует)
     try:
-        await delete_webhook(application)
+        asyncio.run(delete_webhook(application))
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
 
@@ -259,7 +259,7 @@ async def main():
         domain = "http://localhost:8000"
 
     # Запускаем вебхук
-    await application.run_webhook(
+    application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
@@ -267,4 +267,4 @@ async def main():
     )
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
