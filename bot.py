@@ -121,14 +121,18 @@ def build_calendar(year, month):
 
 def build_hour_keyboard():
     markup = []
-    for hour in range(24):
-        markup.append([InlineKeyboardButton(f"{hour:02d}", callback_data=f"hour:{hour:02d}")]
+    # 3x8 сетка для 24 часов
+    for i in range(0, 24, 8):
+        row = [InlineKeyboardButton(f"{h:02d}", callback_data=f"hour:{h}") for h in range(i, min(i+8, 24))]
+        markup.append(row)
     return InlineKeyboardMarkup(markup)
 
 def build_minute_keyboard():
     markup = []
-    for minute in range(0, 60, 5):  # каждые 5 минут
-        markup.append([InlineKeyboardButton(f"{minute:02d}", callback_data=f"minute:{minute:02d}")]
+    # 3x4 сетка для минут (00, 15, 30, 45)
+    for i in range(0, 60, 20):
+        row = [InlineKeyboardButton(f"{m:02d}", callback_data=f"minute:{m}") for m in range(i, i+20, 5)]
+        markup.append(row)
     return InlineKeyboardMarkup(markup)
 
 async def show_calendar(chat_id: int, year: int, month: int, context):
@@ -173,12 +177,6 @@ async def handle_message(update: Update, context) -> None:
         user_data[chat_id]['year'] = today.year
         user_data[chat_id]['month'] = today.month
         await show_calendar(chat_id, today.year, today.month, context)
-    elif user_data.get(chat_id, {}).get('state') == 'selecting_hour':
-        if not text.isdigit() or not (0 <= int(text) <= 23):
-            await update.message.reply_text("🕒 Неверный формат времени. Выберите час из клавиатуры.")
-    elif user_data.get(chat_id, {}).get('state') == 'selecting_minute':
-        if not text.isdigit() or not (0 <= int(text) <= 59):
-            await update.message.reply_text("🕒 Неверный формат времени. Выберите минуты из клавиатуры.")
     elif text == "помощь":
         await help_command(update, context)
     elif text == "перезапустить":
@@ -248,7 +246,10 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Удаляем старый вебхук (если существует)
-    await application.bot.delete_webhook()  # Добавлен await
+    try:
+        await application.bot.delete_webhook()
+    except Exception as e:
+        logger.warning(f"Ошибка при удалении вебхука: {e}")
 
     # Получаем домен Render
     domain = os.getenv("RENDER_EXTERNAL_URL")
