@@ -229,6 +229,10 @@ async def handle_callback(update: Update, context) -> None:
         user_data[chat_id]['month'] = month
         await show_calendar(chat_id, year, month, context)
 
+# Асинхронная функция для удаления вебхука
+async def delete_webhook(application):
+    await application.bot.delete_webhook()
+
 def main() -> None:
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
@@ -247,7 +251,7 @@ def main() -> None:
 
     # Удаляем старый вебхук (если существует)
     try:
-        await application.bot.delete_webhook()
+        asyncio.run(delete_webhook(application))  # Исправлено: запуск асинхронного кода
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
 
