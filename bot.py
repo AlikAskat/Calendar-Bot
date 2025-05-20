@@ -121,16 +121,14 @@ def build_calendar(year, month):
 
 def build_hour_keyboard():
     markup = []
-    # 3x8 сетка для 24 часов
-    for i in range(0, 24, 8):
+    for i in range(0, 24, 8):  # 3x8 сетка
         row = [InlineKeyboardButton(f"{h:02d}", callback_data=f"hour:{h}") for h in range(i, min(i+8, 24))]
         markup.append(row)
     return InlineKeyboardMarkup(markup)
 
 def build_minute_keyboard():
     markup = []
-    # 3x4 сетка для минут (00, 15, 30, 45)
-    for i in range(0, 60, 20):
+    for i in range(0, 60, 20):  # 3x4 сетка
         row = [InlineKeyboardButton(f"{m:02d}", callback_data=f"minute:{m}") for m in range(i, i+20, 5)]
         markup.append(row)
     return InlineKeyboardMarkup(markup)
@@ -233,7 +231,7 @@ async def handle_callback(update: Update, context) -> None:
 async def delete_webhook(application):
     await application.bot.delete_webhook()
 
-def main() -> None:
+async def main():
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -251,7 +249,7 @@ def main() -> None:
 
     # Удаляем старый вебхук (если существует)
     try:
-        asyncio.run(delete_webhook(application))  # Исправлено: запуск асинхронного кода
+        await delete_webhook(application)
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
 
@@ -261,7 +259,7 @@ def main() -> None:
         domain = "http://localhost:8000"
 
     # Запускаем вебхук
-    application.run_webhook(
+    await application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
@@ -269,4 +267,4 @@ def main() -> None:
     )
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
