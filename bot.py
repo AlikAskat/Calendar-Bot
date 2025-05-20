@@ -38,31 +38,27 @@ SCOPES = ['https://www.googleapis.com/auth/calendar ']
 user_data = {}
 
 def get_calendar_service():
-    logger.info("Запуск функции получения сервиса Google Calendar")
-    if not os.path.exists('credentials.json'):
-        raise FileNotFoundError("credentials.json не найден. Загрузите его из Google Cloud Console.")
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
+    logger.info("Запрос сервиса Google Calendar")
+    token_path = "token.pickle"
+    
+    if not os.path.exists(token_path):
+        raise FileNotFoundError("Токен не найден. Выполните авторизацию.")
+
+    with open(token_path, 'rb') as token_file:
+        creds = pickle.load(token_file)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            logger.info("Обновление токена...")
             try:
+                logger.info("Обновление токена")
                 creds.refresh(Request())
             except Exception as e:
                 logger.error(f"Ошибка при обновлении токена: {e}")
                 raise
         else:
-            logger.info("Запуск flow.run_local_server()")
-            try:
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-            except Exception as e:
-                logger.error(f"Ошибка при получении токена: {e}")
-                raise
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
+            logger.warning("Нет действительного токена.")
+            raise FileNotFoundError("Нет действительного токена.")
+
     return build('calendar', 'v3', credentials=creds)
 
 def add_event_to_calendar(summary, start_time, end_time):
@@ -118,6 +114,7 @@ async def handle_message(update: Update, context) -> None:
                 task = user_data[chat_id]['task']
                 start_datetime = selected_date.replace(hour=hour, minute=minute)
                 end_datetime = start_datetime + timedelta(minutes=30)
+
                 event_link = add_event_to_calendar(task, start_datetime, end_datetime)
                 await update.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
                 user_data.pop(chat_id)
@@ -194,7 +191,6 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
 
     if 'calendar_message_id' in user_data.get(chat_id, {}):
-        # Редактируем старое сообщение
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=user_data[chat_id]['calendar_message_id'],
@@ -202,7 +198,6 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
             reply_markup=markup
         )
     else:
-        # Первый запуск — отправляем новое сообщение
         message = await context.bot.send_message(
             chat_id=chat_id,
             text=message_text,
@@ -218,13 +213,29 @@ def main() -> None:
         return
 
     application = Application.builder().token(token).build()
+
+    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("restart", restart))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    application.run_polling()
+    # Удаляем старый вебхук (если существует)
+    application.bot.delete_webhook()
+
+    # Получаем домен Render
+    domain = os.getenv("RENDER_EXTERNAL_URL")
+    if not domain:
+        domain = "http://localhost:8000"  # Для локального тестирования
+
+    # Запускаем вебхук
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        url_path=token,
+        webhook_url=f"{domain}/{token}"
+    )
 
 if __name__ == '__main__':
     main()
