@@ -248,11 +248,19 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Удаляем старый вебхук (если существует)
+    await application.bot.delete_webhook()  # Добавлен await
+
+    # Получаем домен Render
+    domain = os.getenv("RENDER_EXTERNAL_URL")
+    if not domain:
+        domain = "http://localhost:8000"
+
+    # Запускаем вебхук
     application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
-        webhook_url=f"{os.getenv('RENDER_EXTERNAL_URL')}/{token}"
+        webhook_url=f"{domain}/{token}"
     )
 
 if __name__ == '__main__':
