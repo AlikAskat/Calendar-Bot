@@ -20,20 +20,17 @@ try:
 except locale.Error:
     pass
 
-# Русские названия месяцев
 RU_MONTHS = [
     "январь", "февраль", "март", "апрель", "май", "июнь",
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"
 ]
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Исправленный список прав (SCOPES)
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 user_data = {}
@@ -100,11 +97,7 @@ async def help_command(update: Update, context) -> None:
 def build_calendar(year, month):
     markup = []
     cal = calendar.Calendar()
-
-    # Дни недели
     markup.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
-
-    # Дни месяца
     for week in cal.monthdayscalendar(year, month):
         row = []
         for day in week:
@@ -113,8 +106,6 @@ def build_calendar(year, month):
             else:
                 row.append(InlineKeyboardButton(str(day), callback_data=f"day:{year}-{month}-{day}"))
         markup.append(row)
-
-    # Навигация
     month_name = RU_MONTHS[month - 1].capitalize()
     markup.append([
         InlineKeyboardButton("⬅️", callback_data=f"prev:{year}:{month}"),
@@ -125,14 +116,14 @@ def build_calendar(year, month):
 
 def build_hour_keyboard():
     markup = []
-    for i in range(0, 24, 8):  # 3x8 сетка
+    for i in range(0, 24, 8):
         row = [InlineKeyboardButton(f"{h:02d}", callback_data=f"hour:{h}") for h in range(i, min(i+8, 24))]
         markup.append(row)
     return InlineKeyboardMarkup(markup)
 
 def build_minute_keyboard():
     markup = []
-    for i in range(0, 60, 20):  # 3x4 сетка
+    for i in range(0, 60, 20):
         row = [InlineKeyboardButton(f"{m:02d}", callback_data=f"minute:{m}") for m in range(i, i+20, 5)]
         markup.append(row)
     return InlineKeyboardMarkup(markup)
@@ -141,11 +132,8 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
     markup = build_calendar(year, month)
     month_name = RU_MONTHS[month - 1].capitalize()
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
-
-    # Гарантия, что user_data[chat_id] и его словарь инициализирован
     if chat_id not in user_data:
         user_data[chat_id] = {}
-
     if 'calendar_message_id' in user_data[chat_id]:
         await context.bot.edit_message_text(
             chat_id=chat_id,
@@ -172,7 +160,6 @@ async def show_minute_keyboard(chat_id: int, context):
 async def handle_message(update: Update, context) -> None:
     text = update.message.text.strip().lower()
     chat_id = update.effective_chat.id
-
     if text == "добавить задачу":
         user_data[chat_id] = {'state': 'awaiting_task'}
         await update.message.reply_text("Введите название задачи:")
@@ -193,13 +180,10 @@ async def handle_message(update: Update, context) -> None:
 async def handle_callback(update: Update, context) -> None:
     query = update.callback_query
     await query.answer()
-    chat_id = query.message.chat.id  # Исправлено на новый стиль
+    chat_id = query.message.chat.id
     data = query.data
-
-    # Гарантия, что user_data[chat_id] существует для данного пользователя
     if chat_id not in user_data:
         user_data[chat_id] = {}
-
     if data.startswith("day:"):
         _, date_str = data.split(":")
         y, m, d = map(int, date_str.split("-"))
@@ -247,39 +231,32 @@ async def handle_callback(update: Update, context) -> None:
         user_data[chat_id]['month'] = month
         await show_calendar(chat_id, year, month, context)
 
-# Асинхронная функция для удаления вебхука
 async def delete_webhook(application):
     await application.bot.delete_webhook()
 
-def main() -> None:
+async def async_main():
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.error("Переменная TELEGRAM_TOKEN не найдена в .env")
         return
-
     application = Application.builder().token(token).build()
-
-    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("restart", restart))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
     # Удаляем старый вебхук (если существует)
     try:
-        asyncio.run(delete_webhook(application))
+        await delete_webhook(application)
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
-
     # Получаем домен Render
     domain = os.getenv("RENDER_EXTERNAL_URL")
     if not domain:
         domain = "http://localhost:8000"
-
     # Запускаем вебхук
-    application.run_webhook(
+    await application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
@@ -287,4 +264,4 @@ def main() -> None:
     )
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(async_main())
