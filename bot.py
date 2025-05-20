@@ -11,6 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 import calendar
 import logging
+import asyncio
 
 load_dotenv()
 
@@ -92,43 +93,6 @@ async def restart(update: Update, context) -> None:
 async def help_command(update: Update, context) -> None:
     await update.message.reply_text("Чтобы добавить задачу, выберите \"Добавить задачу\" и следуйте инструкциям.")
 
-async def handle_message(update: Update, context) -> None:
-    text = update.message.text.strip().lower()
-    chat_id = update.effective_chat.id
-
-    if text == "добавить задачу":
-        user_data[chat_id] = {'state': 'awaiting_task'}
-        await update.message.reply_text("Введите название задачи:")
-    elif user_data.get(chat_id, {}).get('state') == 'awaiting_task':
-        user_data[chat_id]['task'] = text
-        user_data[chat_id]['state'] = 'selecting_date'
-        today = datetime.today()
-        user_data[chat_id]['year'] = today.year
-        user_data[chat_id]['month'] = today.month
-        await show_calendar(chat_id, today.year, today.month, context)
-    elif user_data.get(chat_id, {}).get('state') == 'selecting_time':
-        try:
-            hour, minute = map(int, text.split(":"))
-            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                selected_date = user_data[chat_id]['date']
-                task = user_data[chat_id]['task']
-                start_datetime = selected_date.replace(hour=hour, minute=minute)
-                end_datetime = start_datetime + timedelta(minutes=30)
-
-                event_link = add_event_to_calendar(task, start_datetime, end_datetime)
-                await update.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
-                user_data.pop(chat_id)
-            else:
-                await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
-        except ValueError:
-            await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
-    elif text == "помощь":
-        await help_command(update, context)
-    elif text == "перезапустить":
-        await restart(update, context)
-    else:
-        await update.message.reply_text("❌ Неизвестная команда. Используйте кнопки меню.")
-
 def build_calendar(year, month):
     markup = []
     cal = calendar.Calendar()
@@ -155,35 +119,17 @@ def build_calendar(year, month):
     ])
     return InlineKeyboardMarkup(markup)
 
-async def handle_callback(update: Update, context) -> None:
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat_id
-    data = query.data
+def build_hour_keyboard():
+    markup = []
+    for hour in range(24):
+        markup.append([InlineKeyboardButton(f"{hour:02d}", callback_data=f"hour:{hour:02d}")]
+    return InlineKeyboardMarkup(markup)
 
-    if data.startswith("day:"):
-        _, date_str = data.split(":")
-        y, m, d = map(int, date_str.split("-"))
-        selected_date = datetime(y, m, d)
-        user_data[chat_id]['date'] = selected_date
-        user_data[chat_id]['state'] = 'selecting_time'
-        await query.message.reply_text("🕒 Введите время в формате ЧЧ:ММ:")
-    elif data.startswith("prev:") or data.startswith("next:"):
-        _, y, m = data.split(":")
-        year, month = int(y), int(m)
-        if data.startswith("prev:"):
-            month -= 1
-            if month < 1:
-                month = 12
-                year -= 1
-        else:
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-        user_data[chat_id]['year'] = year
-        user_data[chat_id]['month'] = month
-        await show_calendar(chat_id, year, month, context)
+def build_minute_keyboard():
+    markup = []
+    for minute in range(0, 60, 5):  # каждые 5 минут
+        markup.append([InlineKeyboardButton(f"{minute:02d}", callback_data=f"minute:{minute:02d}")]
+    return InlineKeyboardMarkup(markup)
 
 async def show_calendar(chat_id: int, year: int, month: int, context):
     markup = build_calendar(year, month)
@@ -207,6 +153,86 @@ async def show_calendar(chat_id: int, year: int, month: int, context):
         )
         user_data[chat_id]['calendar_message_id'] = message.message_id
 
+async def show_hour_keyboard(chat_id: int, context):
+    markup = build_hour_keyboard()
+    await context.bot.send_message(chat_id=chat_id, text="🕒 Выберите час:", reply_markup=markup)
+
+async def show_minute_keyboard(chat_id: int, context):
+    markup = build_minute_keyboard()
+    await context.bot.send_message(chat_id=chat_id, text="🕒 Выберите минуты:", reply_markup=markup)
+
+async def handle_message(update: Update, context) -> None:
+    text = update.message.text.strip().lower()
+    chat_id = update.effective_chat.id
+
+    if text == "добавить задачу":
+        user_data[chat_id] = {'state': 'awaiting_task'}
+        await update.message.reply_text("Введите название задачи:")
+    elif user_data.get(chat_id, {}).get('state') == 'awaiting_task':
+        user_data[chat_id]['task'] = text
+        user_data[chat_id]['state'] = 'selecting_date'
+        today = datetime.today()
+        user_data[chat_id]['year'] = today.year
+        user_data[chat_id]['month'] = today.month
+        await show_calendar(chat_id, today.year, today.month, context)
+    elif user_data.get(chat_id, {}).get('state') == 'selecting_hour':
+        if not text.isdigit() or not (0 <= int(text) <= 23):
+            await update.message.reply_text("🕒 Неверный формат времени. Выберите час из клавиатуры.")
+    elif user_data.get(chat_id, {}).get('state') == 'selecting_minute':
+        if not text.isdigit() or not (0 <= int(text) <= 59):
+            await update.message.reply_text("🕒 Неверный формат времени. Выберите минуты из клавиатуры.")
+    elif text == "помощь":
+        await help_command(update, context)
+    elif text == "перезапустить":
+        await restart(update, context)
+    else:
+        await update.message.reply_text("❌ Неизвестная команда. Используйте кнопки меню.")
+
+async def handle_callback(update: Update, context) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    data = query.data
+
+    if data.startswith("day:"):
+        _, date_str = data.split(":")
+        y, m, d = map(int, date_str.split("-"))
+        selected_date = datetime(y, m, d)
+        user_data[chat_id]['date'] = selected_date
+        user_data[chat_id]['state'] = 'selecting_hour'
+        await show_hour_keyboard(chat_id, context)
+    elif data.startswith("hour:"):
+        hour = int(data.split(":")[1])
+        user_data[chat_id]['hour'] = hour
+        user_data[chat_id]['state'] = 'selecting_minute'
+        await show_minute_keyboard(chat_id, context)
+    elif data.startswith("minute:"):
+        minute = int(data.split(":")[1])
+        user_data[chat_id]['minute'] = minute
+        selected_date = user_data[chat_id]['date']
+        task = user_data[chat_id]['task']
+        start_datetime = selected_date.replace(hour=user_data[chat_id]['hour'], minute=minute)
+        end_datetime = start_datetime + timedelta(minutes=30)
+        event_link = add_event_to_calendar(task, start_datetime, end_datetime)
+        await query.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
+        user_data.pop(chat_id)
+    elif data.startswith("prev:") or data.startswith("next:"):
+        _, y, m = data.split(":")
+        year, month = int(y), int(m)
+        if data.startswith("prev:"):
+            month -= 1
+            if month < 1:
+                month = 12
+                year -= 1
+        else:
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        user_data[chat_id]['year'] = year
+        user_data[chat_id]['month'] = month
+        await show_calendar(chat_id, year, month, context)
+
 def main() -> None:
     logger.info("Запуск бота")
     token = os.getenv("TELEGRAM_TOKEN")
@@ -224,19 +250,11 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Удаляем старый вебхук (если существует)
-    await application.bot.delete_webhook()
-
-    # Получаем домен Render
-    domain = os.getenv("RENDER_EXTERNAL_URL")
-    if not domain:
-        domain = "http://localhost:8000"
-
-    # Запускаем вебхук
     application.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
         url_path=token,
-        webhook_url=f"{domain}/{token}"
+        webhook_url=f"{os.getenv('RENDER_EXTERNAL_URL')}/{token}"
     )
 
 if __name__ == '__main__':
