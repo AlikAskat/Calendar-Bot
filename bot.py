@@ -54,37 +54,6 @@ def get_google_calendar_service():
             pickle.dump(creds, token)
     return build('calendar', 'v3', credentials=creds)
 
-async def add_event_to_calendar(title: str, start_time: datetime) -> str:
-    """Добавляет событие в Google Calendar и возвращает ссылку на него"""
-    try:
-        service = get_google_calendar_service()
-        
-        event = {
-            'summary': title,
-            'start': {
-                'dateTime': start_time.isoformat(),
-                'timeZone': TIMEZONE,
-            },
-            'end': {
-                'dateTime': (start_time + timedelta(hours=1)).isoformat(),
-                'timeZone': TIMEZONE,
-            },
-        }
-
-        event = service.events().insert(calendarId='primary', body=event).execute()
-        return f"https://calendar.google.com/calendar/event?eid={event['id']}"
-    except Exception as e:
-        logger.error(f"Error adding event to calendar: {e}")
-        return ""
-
-def get_main_keyboard():
-    """Создает основную клавиатуру"""
-    keyboard = [
-        [KeyboardButton("➕ Добавить задачу")],
-        [KeyboardButton("🔄 Перезапуск"), KeyboardButton("❓ Помощь")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
 def create_calendar_keyboard(year: int, month: int):
     """Создает клавиатуру-календарь"""
     keyboard = []
@@ -116,17 +85,72 @@ def create_calendar_keyboard(year: int, month: int):
     
     return InlineKeyboardMarkup(keyboard)
 
-def create_time_keyboard():
-    """Создает клавиатуру для выбора времени"""
+def create_time_keyboard(selected_hour: int = 0, selected_minute: int = 0):
+    """Создает клавиатуру для выбора времени с стрелками"""
     keyboard = []
-    for hour in range(8, 21):
-        row = []
-        for minute in ['00', '30']:
-            time = f"{hour:02d}:{minute}"
-            row.append(InlineKeyboardButton(time, callback_data=f"time_{time}"))
-        keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("Отмена", callback_data="cancel")])
+    
+    # Добавляем заголовок
+    keyboard.append([
+        InlineKeyboardButton("Часы", callback_data="ignore"),
+        InlineKeyboardButton("Минуты", callback_data="ignore")
+    ])
+    
+    # Стрелка вверх для часов и минут
+    keyboard.append([
+        InlineKeyboardButton("🔼", callback_data=f"hour_up_{selected_hour}"),
+        InlineKeyboardButton("🔼", callback_data=f"min_up_{selected_minute}")
+    ])
+    
+    # Текущие значения часов и минут
+    keyboard.append([
+        InlineKeyboardButton(f"{selected_hour:02d}", callback_data="ignore"),
+        InlineKeyboardButton(f"{selected_minute:02d}", callback_data="ignore")
+    ])
+    
+    # Стрелка вниз для часов и минут
+    keyboard.append([
+        InlineKeyboardButton("🔽", callback_data=f"hour_down_{selected_hour}"),
+        InlineKeyboardButton("🔽", callback_data=f"min_down_{selected_minute}")
+    ])
+    
+    # Кнопки подтверждения и отмены
+    keyboard.append([
+        InlineKeyboardButton("✅ Готово", callback_data=f"time_{selected_hour:02d}:{selected_minute:02d}"),
+        InlineKeyboardButton("❌ Отмена", callback_data="cancel")
+    ])
+    
     return InlineKeyboardMarkup(keyboard)
+
+def get_main_keyboard():
+    """Создает основную клавиатуру"""
+    keyboard = [
+        [KeyboardButton("➕ Добавить задачу")],
+        [KeyboardButton("🔄 Перезапуск"), KeyboardButton("❓ Помощь")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+async def add_event_to_calendar(title: str, start_time: datetime) -> str:
+    """Добавляет событие в Google Calendar и возвращает ссылку на него"""
+    try:
+        service = get_google_calendar_service()
+        
+        event = {
+            'summary': title,
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': TIMEZONE,
+            },
+            'end': {
+                'dateTime': (start_time + timedelta(hours=1)).isoformat(),
+                'timeZone': TIMEZONE,
+            },
+        }
+
+        event = service.events().insert(calendarId='primary', body=event).execute()
+        return f"https://calendar.google.com/calendar/event?eid={event['id']}"
+    except Exception as e:
+        logger.error(f"Error adding event to calendar: {e}")
+        return ""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /start"""
@@ -225,13 +249,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             user_data[user_id] = {"title": "Новая задача"}
         user_data[user_id]["date"] = {"year": int(year), "month": int(month), "day": int(day)}
         
+        # Начинаем с 00:00
         await query.message.reply_text(
             f"Дата: {selected_date}\n"
-            "Выберите время:",
-            reply_markup=create_time_keyboard()
+            "Выберите время (используйте стрелки для выбора часов и минут):",
+            reply_markup=create_time_keyboard(0, 0)
         )
         user_states[user_id] = "awaiting_time"
+    
+    elif query.data.startswith("hour_up_") or query.data.startswith("hour_down_"):
+        _, direction, current = query.data.split("_")
+        current_hour = int(current)
         
+        if direction == "up":
+            new_hour = current_hour + 1 if current_hour < 23 else 0
+        else:
+            new_hour = current_hour - 1 if current_hour > 0 else 23
+            
+        # Сохраняем текущие минуты из клавиатуры
+        current_minutes = int(query.message.reply_markup.inline_keyboard[2][1].text)
+        
+        await query.message.edit_reply_markup(
+            reply_markup=create_time_keyboard(new_hour, current_minutes)
+        )
+    
+    elif query.data.startswith("min_up_") or query.data.startswith("min_down_"):
+        _, direction, current = query.data.split("_")
+        current_minute = int(current)
+        
+        minutes_steps = [0, 15, 30, 45]  # Шаги для минут
+        current_index = minutes_steps.index(current_minute)
+        
+        if direction == "up":
+            new_index = (current_index + 1) % len(minutes_steps)
+        else:
+            new_index = (current_index - 1) % len(minutes_steps)
+            
+        new_minute = minutes_steps[new_index]
+            
+        # Сохраняем текущие часы из клавиатуры
+        current_hours = int(query.message.reply_markup.inline_keyboard[2][0].text)
+        
+        await query.message.edit_reply_markup(
+            reply_markup=create_time_keyboard(current_hours, new_minute)
+        )
+    
     elif query.data.startswith("time_"):
         time = query.data.split("_")[1]
         if not user_data.get(user_id):
@@ -271,7 +333,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         user_states[user_id] = "main_menu"
         user_data[user_id] = {}
-        
+    
     elif query.data == "cancel":
         await query.message.reply_text(
             "Действие отменено. Используйте кнопки меню:",
