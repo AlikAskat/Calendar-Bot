@@ -3,13 +3,11 @@ import logging
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# Логирование (важно для Render)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Загружаем переменные окружения из .env (локально) и из среды Render (на сервере)
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -25,7 +23,7 @@ async def echo(update, context):
 async def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Удаляем старый вебхук (без await может остаться лишний вебхук)
+    # Удаляем старый вебхук
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Вебхук успешно удалён")
@@ -36,9 +34,8 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # Render: Webhook (т.к. polling не поддерживается)
     port = int(os.environ.get("PORT", 10000))
-    url = os.environ.get("RENDER_EXTERNAL_URL")  # Render автоматически задаёт этот URL
+    url = os.environ.get("RENDER_EXTERNAL_URL")
     if not url:
         logger.error("RENDER_EXTERNAL_URL не установлен. Проверьте настройки Render.")
         return
@@ -47,6 +44,7 @@ async def main():
     logger.info(f"Устанавливаю вебхук: {webhook_url}")
 
     await application.bot.set_webhook(webhook_url)
+    await application.initialize()  # <-- добавлена строка
     await application.start()
     await application.updater.start_webhook(
         listen="0.0.0.0",
