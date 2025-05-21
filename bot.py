@@ -29,13 +29,31 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 user_states = {}
 user_data = {}
 
+def get_google_calendar_service():
+    """Получение сервиса Google Calendar"""
+    creds = None
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    return build('calendar', 'v3', credentials=creds)
+
 def create_calendar_keyboard(year, month):
     """Создает клавиатуру-календарь"""
     keyboard = []
     
     # Добавляем заголовок с месяцем и годом
-    month_name = calendar.month_name[month]
-    keyboard.append([InlineKeyboardButton(f"{month_name} {year}", callback_data="ignore")])
+    month_names = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+    keyboard.append([InlineKeyboardButton(f"{month_names[month-1]} {year}", callback_data="ignore")])
     
     # Добавляем дни недели
     week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
@@ -71,12 +89,13 @@ def create_calendar_keyboard(year, month):
 def create_time_keyboard():
     """Создает клавиатуру для выбора времени"""
     keyboard = []
-    hours = [f"{i:02d}:00" for i in range(8, 21)]  # с 8:00 до 20:00
     
-    # Группируем по 3 кнопки в ряд
-    for i in range(0, len(hours), 3):
-        row = [InlineKeyboardButton(time, callback_data=f"time_{time}") 
-               for time in hours[i:i+3]]
+    # Создаем кнопки для часов (с 8 до 20)
+    for hour in range(8, 21):
+        row = []
+        for minute in ['00', '30']:
+            time = f"{hour:02d}:{minute}"
+            row.append(InlineKeyboardButton(time, callback_data=f"time_{time}"))
         keyboard.append(row)
     
     # Добавляем кнопку отмены
@@ -87,45 +106,68 @@ def create_time_keyboard():
 def get_main_keyboard():
     """Создает основную клавиатуру"""
     keyboard = [
-        [KeyboardButton("📅 Добавить задачу")],
+        [KeyboardButton("📝 Название задачи")],
         [KeyboardButton("📋 Мои задачи"), KeyboardButton("🔍 Поиск задач")],
         [KeyboardButton("⚙️ Настройки"), KeyboardButton("🔄 Перезапуск")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+async def add_event_to_calendar(title, start_time, user_id):
+    """Добавляет событие в Google Calendar"""
+    service = get_google_calendar_service()
+    
+    event = {
+        'summary': title,
+        'start': {
+            'dateTime': start_time.isoformat(),
+            'timeZone': 'Asia/Almaty',
+        },
+        'end': {
+            'dateTime': (start_time + timedelta(hours=1)).isoformat(),
+            'timeZone': 'Asia/Almaty',
+        },
+    }
+
+    event = service.events().insert(calendarId='primary', body=event).execute()
+    return f"https://calendar.google.com/calendar/event?eid={event['id']}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
     await update.message.reply_text(
         f"Привет, {user.first_name}! 👋\n\n"
-        "Я помогу вам управлять вашими задачами и встречами в календаре. "
-        "Используйте кнопки ниже для навигации:",
+        "Я помогу вам управлять задачами в календаре. "
+        "Для начала введите название задачи:",
         reply_markup=get_main_keyboard()
     )
-    user_states[user.id] = "main_menu"
-
-async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды перезапуска"""
-    await start(update, context)
+    user_states[user.id] = "awaiting_title"
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     text = update.message.text
     user_id = update.effective_user.id
+    state = user_states.get(user_id, "awaiting_title")
     
     if text == "🔄 Перезапуск":
-        await restart(update, context)
+        await start(update, context)
         return
 
-    if text == "📅 Добавить задачу":
+    if state == "awaiting_title":
+        user_data[user_id] = {"title": text}
         now = datetime.now()
         await update.message.reply_text(
-            "Выберите дату:",
+            f"Задача: {text}\n"
+            "Теперь выберите дату в календаре:",
             reply_markup=create_calendar_keyboard(now.year, now.month)
         )
         user_states[user_id] = "awaiting_date"
-        
-    # ... (остальные обработчики текста остаются без изменений)
+    
+    elif text == "📋 Мои задачи":
+        # Здесь можно добавить получение списка задач из Google Calendar
+        await update.message.reply_text("Функция просмотра задач в разработке")
+    
+    elif text == "⚙️ Настройки":
+        await update.message.reply_text("Настройки временно недоступны")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик callback запросов"""
@@ -145,27 +187,53 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Обработка выбора даты
         _, year, month, day = query.data.split("_")
         selected_date = f"{day}.{month}.{year}"
-        user_data[user_id] = {"date": selected_date}
+        user_data[user_id]["date"] = {"year": int(year), "month": int(month), "day": int(day)}
         
         await query.message.reply_text(
-            f"Выбрана дата: {selected_date}\n"
-            "Теперь выберите время:",
+            f"Дата: {selected_date}\n"
+            "Выберите время:",
             reply_markup=create_time_keyboard()
         )
         user_states[user_id] = "awaiting_time"
         
     elif query.data.startswith("time_"):
-        # Обработка выбора времени
         time = query.data.split("_")[1]
         user_data[user_id]["time"] = time
         
-        await query.message.reply_text(
-            f"Выбрано время: {time}\n"
-            "Теперь введите описание задачи:"
-        )
-        user_states[user_id] = "awaiting_task_description"
+        # Создаем событие в календаре
+        title = user_data[user_id]["title"]
+        date = user_data[user_id]["date"]
+        hour, minute = map(int, time.split(":"))
         
-    # ... (остальные обработчики callback остаются без изменений)
+        start_time = datetime(
+            date["year"], date["month"], date["day"],
+            hour, minute
+        )
+        
+        try:
+            calendar_url = await add_event_to_calendar(title, start_time, user_id)
+            await query.message.reply_text(
+                f"✅ Задача успешно добавлена!\n\n"
+                f"📝 {title}\n"
+                f"📅 {start_time.strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"🔗 Посмотреть в календаре: {calendar_url}"
+            )
+        except Exception as e:
+            logger.error(f"Error adding event to calendar: {e}")
+            await query.message.reply_text(
+                "❌ Произошла ошибка при добавлении задачи в календарь."
+            )
+        
+        user_states[user_id] = "awaiting_title"
+        user_data[user_id] = {}
+        
+    elif query.data == "cancel":
+        await query.message.reply_text(
+            "Действие отменено. Введите название новой задачи:",
+            reply_markup=get_main_keyboard()
+        )
+        user_states[user_id] = "awaiting_title"
+        user_data[user_id] = {}
 
 def main():
     """Основная функция"""
@@ -176,7 +244,6 @@ def main():
 
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("restart", restart))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_callback))
 
