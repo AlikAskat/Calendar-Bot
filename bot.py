@@ -3,11 +3,13 @@ import logging
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
+# Логирование (важно для Render и отладки)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Загружаем переменные окружения (локально .env, на Render переменные среды)
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -23,7 +25,6 @@ async def echo(update, context):
 async def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Удаляем старый вебхук
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Вебхук успешно удалён")
@@ -34,6 +35,7 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
+    # Webhook-режим для Render
     port = int(os.environ.get("PORT", 10000))
     url = os.environ.get("RENDER_EXTERNAL_URL")
     if not url:
@@ -44,7 +46,7 @@ async def main():
     logger.info(f"Устанавливаю вебхук: {webhook_url}")
 
     await application.bot.set_webhook(webhook_url)
-    await application.initialize()  # <-- добавлена строка
+    await application.initialize()
     await application.start()
     await application.updater.start_webhook(
         listen="0.0.0.0",
@@ -52,7 +54,7 @@ async def main():
         webhook_url=webhook_url,
     )
     logger.info("Бот запущен на Render через Webhook.")
-    await application.updater.idle()
+    await application.wait_until_shutdown()  # Корректно для ptb v20+ и webhooks!
 
 if __name__ == "__main__":
     import asyncio
