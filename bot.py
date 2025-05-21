@@ -3,33 +3,31 @@ import logging
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# Настройка логирования
+# Логирование (важно для Render)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Загрузка переменных окружения из .env
+# Загружаем переменные окружения из .env (локально) и из среды Render (на сервере)
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 if not TOKEN:
-    raise ValueError("Переменная TELEGRAM_TOKEN не установлена в .env файле!")
+    raise ValueError("Переменная TELEGRAM_TOKEN не установлена!")
 
-# Пример обработчика команды /start
 async def start(update, context):
     await update.message.reply_text("Привет! Я ваш календарный бот.")
 
-# Пример обработчика текстовых сообщений
 async def echo(update, context):
     await update.message.reply_text(f"Вы написали: {update.message.text}")
 
 async def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Удаляем вебхук (если был установлен)
+    # Удаляем старый вебхук (без await может остаться лишний вебхук)
     try:
-        await application.bot.delete_webhook()
+        await application.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Вебхук успешно удалён")
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
@@ -38,11 +36,24 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    # Запуск бота (режим Polling)
-    await application.initialize()
+    # Render: Webhook (т.к. polling не поддерживается)
+    port = int(os.environ.get("PORT", 10000))
+    url = os.environ.get("RENDER_EXTERNAL_URL")  # Render автоматически задаёт этот URL
+    if not url:
+        logger.error("RENDER_EXTERNAL_URL не установлен. Проверьте настройки Render.")
+        return
+
+    webhook_url = f"{url}/webhook/{TOKEN}"
+    logger.info(f"Устанавливаю вебхук: {webhook_url}")
+
+    await application.bot.set_webhook(webhook_url)
     await application.start()
-    logger.info("Бот запущен. Ожидаю сообщения...")
-    await application.updater.start_polling()
+    await application.updater.start_webhook(
+        listen="0.0.0.0",
+        port=port,
+        webhook_url=webhook_url,
+    )
+    logger.info("Бот запущен на Render через Webhook.")
     await application.updater.idle()
 
 if __name__ == "__main__":
