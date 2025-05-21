@@ -40,16 +40,14 @@ def main():
         logger.error("RENDER_EXTERNAL_URL не установлен")
         return
     
-    webhook_path = f"webhook/{TOKEN}"
-    webhook_url = f"{app_url}/{webhook_path}"
-    
+    webhook_url = f"{app_url}/webhook/{TOKEN}"
     logger.info(f"Setting webhook URL: {webhook_url}")
     
     # Запускаем webhook
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
-        webhook_path=f"/{webhook_path}",  # Добавлен слеш в начале
+        url_path=f"webhook/{TOKEN}",  # Используем url_path вместо webhook_path
         webhook_url=webhook_url,
         drop_pending_updates=True
     )
