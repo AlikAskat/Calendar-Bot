@@ -1,3 +1,10 @@
+"""
+Calendar Bot
+Version: v22
+Last update: 2025-05-22
+Author: AlikAskat
+"""
+
 import os
 import json
 import logging
@@ -72,6 +79,7 @@ class UserSessionManager:
             self.data.pop(user_id, None)
             self.last_activity.pop(user_id, None)
 
+# Инициализация менеджера сессий
 user_session = UserSessionManager()
 
 def get_google_calendar_service():
@@ -406,17 +414,13 @@ def main() -> None:
     webhook_url = f"{app_url}/webhook/{TOKEN}"
     logger.info(f"Setting webhook URL: {webhook_url}")
     
-    # Запускаем webhook с оптимизированными настройками
+    # Запускаем webhook
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=f"webhook/{TOKEN}",
         webhook_url=webhook_url,
-        drop_pending_updates=True,
-        webhook_max_connections=40,
-        read_timeout=7,
-        write_timeout=7,
-        connect_timeout=7
+        drop_pending_updates=True
     )
 
 if __name__ == "__main__":
