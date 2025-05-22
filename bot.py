@@ -1,5 +1,7 @@
 import os
 import logging
+from datetime import datetime, timedelta
+import calendar
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -12,8 +14,9 @@ from telegram.ext import (
 )
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import calendar
 import asyncio
+
+load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
@@ -22,7 +25,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения
-load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Переменная TELEGRAM_TOKEN не установлена!")
@@ -72,61 +74,79 @@ def create_calendar_keyboard(year, month):
         keyboard.append(row)
     # Навигация
     prev_month = month - 1 if month > 1 else 12
-    prev_year = year if month > 1 else year - 1
     next_month = month + 1 if month < 12 else 1
+    prev_year = year if month > 1 else year - 1
     next_year = year if month < 12 else year + 1
 
     keyboard.append([
-        InlineKeyboardButton("⬅️", callback_data=f"calendar_{prev_year}_{prev_month}"),
-        InlineKeyboardButton("➡️", callback_data=f"calendar_{next_year}_{next_month}")
+        InlineKeyboardButton("<<", callback_data=f"calendar_{prev_year}_{prev_month}"),
+        InlineKeyboardButton("Отмена", callback_data="cancel"),
+        InlineKeyboardButton(">>", callback_data=f"calendar_{next_year}_{next_month}")
     ])
     return InlineKeyboardMarkup(keyboard)
 
 def create_time_keyboard():
     """Создает клавиатуру для выбора времени"""
-    hours = [f"{h:02d}" for h in range(24)]
-    minutes = [f"{m:02d}" for m in range(0, 60, 5)]  # каждые 5 минут
-
-    hour_markup = []
-    for i in range(0, 24, 8):  # 3x8 сетка
-        hour_markup.append(
-            [InlineKeyboardButton(h, callback_data=f"time_{h}") for h in hours[i:i+8]]
-        )
-
-    minute_markup = []
-    for i in range(0, 60, 20):  # 3x4 сетка
-        minute_markup.append(
-            [InlineKeyboardButton(m, callback_data=f"time_{m}") for m in minutes[i:i+20]]
-        )
-
-    return InlineKeyboardMarkup(hour_markup + minute_markup)
+    keyboard = []
+    for hour in range(0, 24, 4):
+        row = []
+        for h in range(hour, min(hour + 4, 24)):
+            row.append(InlineKeyboardButton(f"{h:02d}:00", callback_data=f"time_{h:02d}_00"))
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("Отмена", callback_data="cancel")])
+    return InlineKeyboardMarkup(keyboard)
 
 def get_main_keyboard():
     """Создает основную клавиатуру"""
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ Добавить задачу")],
         [KeyboardButton("🔄 Перезапуск"), KeyboardButton("❓ Помощь")]
-    ], resize_keyboard=True, one_time_keyboard=False)
+    ], resize_keyboard=True)
 
-# --- Обработчики --- #
+@retry.Retry(predicate=retry.if_transient_error)
+def add_event_to_calendar(title: str, start_time: datetime) -> str:
+    """Добавляет событие в Google Calendar с поддержкой повторных попыток"""
+    try:
+        service = get_google_calendar_service()
+        if not service:
+            return ""
+        event = {
+            'summary': title,
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': TIMEZONE,
+            },
+            'end': {
+                'dateTime': (start_time + timedelta(hours=1)).isoformat(),
+                'timeZone': TIMEZONE,
+            },
+        }
+        event = service.events().insert(calendarId='primary', body=event).execute()
+        return f"https://calendar.google.com/calendar/event?eid= {event['id']}"
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка: {e}")
+        return ""
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    user_states[user_id] = "main_menu"
+    """Обработчик команды /start"""
+    user = update.effective_user
+    user_states[user.id] = "main_menu"
     await update.message.reply_text(
-        f"Привет, {update.effective_user.first_name}! 👋\n"
+        f"Привет, {user.first_name}! 👋\n"
         "Я помогу вам управлять задачами в календаре.\n"
         "Нажмите '➕ Добавить задачу' чтобы начать, или '❓ Помощь' для получения справки.",
         reply_markup=get_main_keyboard()
     )
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает справку по командам"""
     help_text = (
         "📝 *Справка по командам:*\n"
         "➕ *Добавить задачу* - создание новой задачи:\n"
-        "  1. Введите название задачи\n"
-        "  2. Выберите дату в календаре\n"
-        "  3. Выберите время\n"
-        "  4. Получите ссылку на событие в Google Calendar\n"
+        "   1. Введите название задачи\n"
+        "   2. Выберите дату в календаре\n"
+        "   3. Выберите время\n"
+        "   4. Получите ссылку на событие в Google Calendar\n"
         "🔄 *Перезапуск* - очистка чата и перезапуск бота\n"
         "❓ *Помощь* - показать это сообщение\n"
         "Чтобы начать, нажмите '➕ Добавить задачу'"
@@ -134,6 +154,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Очищает чат и перезапускает бота"""
     user_id = update.effective_user.id
     user_states[user_id] = "main_menu"
     user_data[user_id] = {}
@@ -144,14 +165,16 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик текстовых сообщений"""
     text = update.message.text.strip()
     user_id = update.effective_user.id
+    state = user_states.get(user_id, "main_menu")
 
     if text == "➕ Добавить задачу":
         user_states[user_id] = "awaiting_title"
         await update.message.reply_text("Введите название задачи:")
         return
-    elif user_states.get(user_id) == "awaiting_title":
+    elif state == "awaiting_title":
         user_data[user_id] = {"title": text}
         now = datetime.now()
         user_states[user_id] = "awaiting_date"
@@ -159,7 +182,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"Задача: {text}\nТеперь выберите дату в календаре:",
             reply_markup=create_calendar_keyboard(now.year, now.month)
         )
-        return
     elif text == "❓ Помощь":
         await show_help(update, context)
     elif text == "🔄 Перезапуск":
@@ -171,6 +193,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик callback запросов"""
     query = update.callback_query
     user_id = query.from_user.id
     await query.answer()
@@ -180,25 +203,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.message.reply_text("Выберите дату:", reply_markup=create_calendar_keyboard(int(year), int(month)))
     elif query.data.startswith("date_"):
         _, year, month, day = query.data.split("_")
-        user_data[user_id] = {"date": {"year": int(year), "month": int(month), "day": int(day)}}
-        user_states[user_id] = "awaiting_time"
-        await query.message.reply_text("Выберите время:", reply_markup=create_time_keyboard())
-    elif query.data.startswith("time_"):
-        _, time_str = query.data.split("_")
+        selected_date = f"{day}.{month}.{year}"
         if user_id not in user_data:
-            await query.message.reply_text("Ошибка: начните сначала.", reply_markup=get_main_keyboard())
+            user_data[user_id] = {"title": "Новая задача"}
+        user_data[user_id]["date"] = {"year": int(year), "month": int(month), "day": int(day)}
+        await query.message.reply_text(
+            f"Дата: {selected_date}\nВыберите время:",
+            reply_markup=create_time_keyboard()
+        )
+        user_states[user_id] = "awaiting_time"
+    elif query.data.startswith("time_"):
+        _, hour, minute = query.data.split("_")
+        if user_id not in user_data:
+            await query.message.reply_text(
+                "Произошла ошибка. Начните сначала:",
+                reply_markup=get_main_keyboard()
+            )
             return
-
-        user_data[user_id]["time"] = time_str
+        user_data[user_id]["time"] = f"{hour}:{minute}"
         title = user_data[user_id].get("title", "Новая задача")
         date = user_data[user_id]["date"]
-        hour, minute = map(int, time_str.split(":"))
-        start_time = datetime(date["year"], date["month"], date["day"], hour, minute)
+        start_time = datetime(
+            date["year"], date["month"], date["day"],
+            int(hour), int(minute)
+        )
         calendar_url = add_event_to_calendar(title, start_time)
-
         if calendar_url:
             await query.message.reply_text(
-                f"✅ Задача добавлена!\n"
+                f"✅ Задача успешно добавлена!\n"
                 f"📝 {title}\n"
                 f"📅 {start_time.strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔗 Посмотреть в календаре: {calendar_url}",
@@ -213,31 +245,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user_states[user_id] = "main_menu"
         user_data[user_id] = {}
     elif query.data == "cancel":
-        await query.message.reply_text("Действие отменено. Используйте кнопки меню:", reply_markup=get_main_keyboard())
+        await query.message.reply_text(
+            "Действие отменено. Используйте кнопки меню:",
+            reply_markup=get_main_keyboard()
+        )
         user_states[user_id] = "main_menu"
         user_data[user_id] = {}
 
-# --- Функции добавления события --- #
-def add_event_to_calendar(title, start_time):
-    """Добавляет событие в Google Calendar"""
-    try:
-        service = get_google_calendar_service()
-        if not service:
-            return ""
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик ошибок"""
+    logger.error(f"Update {update} caused error {context.error}")
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите '🔄 Перезапуск'.",
+            reply_markup=get_main_keyboard()
+        )
 
-        event = {
-            'summary': title,
-            'start': {'dateTime': start_time.isoformat(), 'timeZone': TIMEZONE},
-            'end': {'dateTime': (start_time + timedelta(hours=1)).isoformat(), 'timeZone': TIMEZONE},
-        }
-        event = service.events().insert(calendarId='primary', body=event).execute()
-        return f"https://calendar.google.com/calendar/event?eid= {event['id']}"
-    except Exception as e:
-        logger.error(f"Ошибка Google Calendar API: {e}")
-        return ""
-
-# --- Основная функция --- #
 async def main() -> None:
+    """Основная функция"""
     logger.info("Запуск бота")
 
     # Создаем приложение
@@ -264,7 +289,7 @@ async def main() -> None:
         return
 
     # Настройки для вебхука
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("PORT", 10000))  # Стандартный порт Render
     url_path = "/webhook"  # Фиксированный путь
     webhook_url = f"{domain}{url_path}/{TOKEN}"
 
@@ -279,15 +304,5 @@ async def main() -> None:
         drop_pending_updates=True
     )
 
-# --- Обработчик ошибок --- #
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error(f"Update {update} caused error {context.error}")
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите '🔄 Перезапуск'.",
-            reply_markup=get_main_keyboard()
-        )
-
-# --- Запуск --- #
 if __name__ == "__main__":
     asyncio.run(main())
