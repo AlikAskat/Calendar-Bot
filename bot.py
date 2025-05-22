@@ -1,6 +1,6 @@
 """
 Calendar Bot
-Version: v25
+Version: v26
 Last update: 2025-05-22
 Author: AlikAskat
 """
@@ -11,7 +11,13 @@ import logging
 from datetime import datetime, timedelta
 import calendar
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import (
+    Update, 
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup, 
+    ReplyKeyboardMarkup, 
+    KeyboardButton
+)
 from telegram.ext import (
     Updater,
     CommandHandler,
@@ -141,7 +147,7 @@ def add_event_to_calendar(title: str, start_time: datetime) -> str:
         logger.error(f"Непредвиденная ошибка: {e}")
         return ""
 
-def start(update: Update, context) -> None:
+def start(update, context):
     """Обработчик команды /start"""
     user = update.effective_user
     user_states[user.id] = "main_menu"
@@ -152,7 +158,7 @@ def start(update: Update, context) -> None:
         reply_markup=get_main_keyboard()
     )
 
-def show_help(update: Update, context) -> None:
+def show_help(update, context):
     """Показывает справку по командам"""
     help_text = (
         "📝 *Справка по командам:*\n\n"
@@ -167,7 +173,7 @@ def show_help(update: Update, context) -> None:
     )
     update.message.reply_text(help_text, parse_mode='Markdown')
 
-def restart(update: Update, context) -> None:
+def restart(update, context):
     """Очищает чат и перезапускает бота"""
     user_id = update.effective_user.id
     user_states[user_id] = "main_menu"
@@ -179,7 +185,7 @@ def restart(update: Update, context) -> None:
         reply_markup=get_main_keyboard()
     )
 
-def handle_text(update: Update, context) -> None:
+def handle_text(update, context):
     """Обработчик текстовых сообщений"""
     text = update.message.text
     user_id = update.effective_user.id
@@ -215,7 +221,7 @@ def handle_text(update: Update, context) -> None:
             reply_markup=get_main_keyboard()
         )
 
-def handle_callback(update: Update, context) -> None:
+def handle_callback(update, context):
     """Обработчик callback запросов"""
     query = update.callback_query
     user_id = query.from_user.id
@@ -288,7 +294,7 @@ def handle_callback(update: Update, context) -> None:
         user_states[user_id] = "main_menu"
         user_data[user_id] = {}
 
-def error_handler(update: Update, context) -> None:
+def error_handler(update, context):
     """Обработчик ошибок"""
     logger.error(f"Update {update} caused error {context.error}")
     if update.effective_message:
@@ -297,11 +303,12 @@ def error_handler(update: Update, context) -> None:
             reply_markup=get_main_keyboard()
         )
 
-def main() -> None:
+def main():
     """Основная функция"""
     logger.info("Запуск бота")
     
-    updater = Updater(TOKEN, use_context=True)
+    # Инициализация бота
+    updater = Updater(TOKEN)
     dp = updater.dispatcher
 
     # Добавляем обработчики
@@ -323,7 +330,6 @@ def main() -> None:
     updater.start_webhook(
         listen="0.0.0.0",
         port=port,
-        url_path=TOKEN,
         webhook_url=f"{app_name}/{TOKEN}"
     )
     
