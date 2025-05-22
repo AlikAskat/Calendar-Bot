@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: v26
-Last update: 2025-05-22
+Version: v28
+Last update: 2025-05-22 10:54:50
 Author: AlikAskat
 """
 
@@ -19,11 +19,12 @@ from telegram import (
     KeyboardButton
 )
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    Filters
+    ContextTypes,
+    filters
 )
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -147,18 +148,18 @@ def add_event_to_calendar(title: str, start_time: datetime) -> str:
         logger.error(f"Непредвиденная ошибка: {e}")
         return ""
 
-def start(update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /start"""
     user = update.effective_user
     user_states[user.id] = "main_menu"
-    update.message.reply_text(
+    await update.message.reply_text(
         f"Привет, {user.first_name}! 👋\n\n"
         "Я помогу вам управлять задачами в календаре.\n"
         "Нажмите '➕ Добавить задачу' чтобы начать, или '❓ Помощь' для получения справки.",
         reply_markup=get_main_keyboard()
     )
 
-def show_help(update, context):
+async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Показывает справку по командам"""
     help_text = (
         "📝 *Справка по командам:*\n\n"
@@ -171,36 +172,36 @@ def show_help(update, context):
         "❓ *Помощь* - показать это сообщение\n\n"
         "Чтобы начать, нажмите '➕ Добавить задачу'"
     )
-    update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text, parse_mode='Markdown')
 
-def restart(update, context):
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Очищает чат и перезапускает бота"""
     user_id = update.effective_user.id
     user_states[user_id] = "main_menu"
     user_data[user_id] = {}
     
-    update.message.reply_text(
+    await update.message.reply_text(
         "🔄 Бот перезапущен!\n"
         "Все данные очищены. Можно начать заново:",
         reply_markup=get_main_keyboard()
     )
 
-def handle_text(update, context):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик текстовых сообщений"""
     text = update.message.text
     user_id = update.effective_user.id
     state = user_states.get(user_id, "main_menu")
     
     if text == "🔄 Перезапуск":
-        restart(update, context)
+        await restart(update, context)
         return
         
     elif text == "❓ Помощь":
-        show_help(update, context)
+        await show_help(update, context)
         return
         
     elif text == "➕ Добавить задачу":
-        update.message.reply_text(
+        await update.message.reply_text(
             "Введите название задачи:"
         )
         user_states[user_id] = "awaiting_title"
@@ -209,28 +210,28 @@ def handle_text(update, context):
     if state == "awaiting_title":
         user_data[user_id] = {"title": text}
         now = datetime.now()
-        update.message.reply_text(
+        await update.message.reply_text(
             f"Задача: {text}\n"
             "Теперь выберите дату в календаре:",
             reply_markup=create_calendar_keyboard(now.year, now.month)
         )
         user_states[user_id] = "awaiting_date"
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             "Используйте кнопки меню для навигации или нажмите '❓ Помощь' для получения справки:",
             reply_markup=get_main_keyboard()
         )
 
-def handle_callback(update, context):
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик callback запросов"""
     query = update.callback_query
     user_id = query.from_user.id
     
-    query.answer()
+    await query.answer()
 
     if query.data.startswith("calendar_"):
         _, year, month = query.data.split("_")
-        query.edit_message_reply_markup(
+        await query.edit_message_reply_markup(
             reply_markup=create_calendar_keyboard(int(year), int(month))
         )
         
@@ -241,7 +242,7 @@ def handle_callback(update, context):
             user_data[user_id] = {"title": "Новая задача"}
         user_data[user_id]["date"] = {"year": int(year), "month": int(month), "day": int(day)}
         
-        query.message.reply_text(
+        await query.message.reply_text(
             f"Дата: {selected_date}\n"
             "Выберите время:",
             reply_markup=create_time_keyboard()
@@ -251,7 +252,7 @@ def handle_callback(update, context):
     elif query.data.startswith("time_"):
         _, hour, minute = query.data.split("_")
         if user_id not in user_data:
-            query.message.reply_text(
+            await query.message.reply_text(
                 "Произошла ошибка. Начните сначала:",
                 reply_markup=get_main_keyboard()
             )
@@ -269,7 +270,7 @@ def handle_callback(update, context):
         calendar_url = add_event_to_calendar(title, start_time)
         
         if calendar_url:
-            query.message.reply_text(
+            await query.message.reply_text(
                 f"✅ Задача успешно добавлена!\n\n"
                 f"📝 {title}\n"
                 f"📅 {start_time.strftime('%d.%m.%Y %H:%M')}\n\n"
@@ -277,7 +278,7 @@ def handle_callback(update, context):
                 reply_markup=get_main_keyboard()
             )
         else:
-            query.message.reply_text(
+            await query.message.reply_text(
                 "❌ Произошла ошибка при добавлении задачи в календарь.\n"
                 "Попробуйте еще раз:",
                 reply_markup=get_main_keyboard()
@@ -287,56 +288,52 @@ def handle_callback(update, context):
         user_data[user_id] = {}
     
     elif query.data == "cancel":
-        query.message.reply_text(
+        await query.message.reply_text(
             "Действие отменено. Используйте кнопки меню:",
             reply_markup=get_main_keyboard()
         )
         user_states[user_id] = "main_menu"
         user_data[user_id] = {}
 
-def error_handler(update, context):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик ошибок"""
     logger.error(f"Update {update} caused error {context.error}")
     if update.effective_message:
-        update.effective_message.reply_text(
+        await update.effective_message.reply_text(
             "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите '🔄 Перезапуск'.",
             reply_markup=get_main_keyboard()
         )
 
-def main():
+async def main() -> None:
     """Основная функция"""
     logger.info("Запуск бота")
     
-    # Инициализация бота
-    updater = Updater(TOKEN)
-    dp = updater.dispatcher
+    # Инициализация приложения
+    application = Application.builder().token(TOKEN).build()
 
     # Добавляем обработчики
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", show_help))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
-    dp.add_handler(CallbackQueryHandler(handle_callback))
-    dp.add_error_handler(error_handler)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", show_help))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_error_handler(error_handler)
 
     # Настройки для webhook
     port = int(os.environ.get("PORT", "8443"))
-    app_name = os.environ.get("RENDER_EXTERNAL_URL")
+    app_url = os.environ.get("RENDER_EXTERNAL_URL")
     
-    if not app_name:
+    if not app_url:
         logger.error("RENDER_EXTERNAL_URL не установлен")
         return
 
-    # Запускаем webhook
-    updater.start_webhook(
+    # Запускаем webhook с минимальными настройками
+    await application.run_webhook(
         listen="0.0.0.0",
         port=port,
-        webhook_url=f"{app_name}/{TOKEN}"
+        url_path="",
+        webhook_url=app_url
     )
-    
-    logger.info(f"Бот запущен и слушает на порту {port}")
-    
-    # Держим бота активным
-    updater.idle()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
