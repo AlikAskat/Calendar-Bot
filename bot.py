@@ -1,6 +1,6 @@
 """
 Calendar Bot
-Version: v23
+Version: v24
 Last update: 2025-05-22
 Author: AlikAskat
 """
@@ -32,14 +32,29 @@ def main() -> None:
     webhook_path = f"webhook/{TOKEN}"
     webhook_url = f"{app_url}/{webhook_path}"
     logger.info(f"Setting webhook URL: {webhook_url}")
-    
-    # Запускаем webhook с минимальными настройками
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=webhook_path,
-        webhook_url=webhook_url
-    )
+
+    try:
+        # Простой запуск webhook
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=webhook_path,
+            webhook_url=webhook_url
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при запуске webhook: {e}")
+        # Попробуем альтернативный способ запуска
+        try:
+            application.start_webhook(
+                listen="0.0.0.0",
+                port=port,
+                url_path=webhook_path,
+                webhook_url=webhook_url
+            )
+            application.idle()
+        except Exception as e2:
+            logger.error(f"Ошибка при альтернативном запуске webhook: {e2}")
+            return
 
 if __name__ == "__main__":
     main()
