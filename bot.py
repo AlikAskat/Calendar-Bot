@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.6
-Last Updated: 2025-05-28 19:00
+Version: 1.0.7
+Last Updated: 2025-05-28 19:10
 Author: AlikAskat
 """
 
@@ -30,7 +30,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # Версия бота
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования
@@ -107,15 +107,20 @@ async def run_application():
 
     # Запуск webhook
     async with application:
-        await application.start()
-        await application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=f"webhook/{TOKEN}",
-            webhook_url=webhook_url,
-            drop_pending_updates=True
-        )
-        await application.stop()
+        try:
+            await application.start()
+            await application.run_webhook(
+                listen="0.0.0.0",
+                port=port,
+                url_path=f"webhook/{TOKEN}",
+                webhook_url=webhook_url,
+                drop_pending_updates=True
+            )
+        except Exception as e:
+            logger.error(f"Критическая ошибка: {e}")
+        finally:
+            await application.stop()
+            logger.info("Приложение остановлено корректно.")
 
 def main():
     """
