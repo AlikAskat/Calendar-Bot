@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.7
-Last Updated: 2025-05-28 19:10
+Version: 1.0.8
+Last Updated: 2025-05-28 19:15
 Author: AlikAskat
 """
 
@@ -13,24 +13,13 @@ import sys
 import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
-import calendar
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-    ContextTypes
-)
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Версия бота
-__version__ = '1.0.7'
+__version__ = '1.0.8'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования
@@ -44,10 +33,6 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Переменная TELEGRAM_TOKEN не установлена!")
-
-# Глобальные переменные
-SCOPES = ['https://www.googleapis.com/auth/calendar']
-TIMEZONE = 'Asia/Almaty'
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -106,21 +91,22 @@ async def run_application():
         return
 
     # Запуск webhook
-    async with application:
-        try:
-            await application.start()
-            await application.run_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path=f"webhook/{TOKEN}",
-                webhook_url=webhook_url,
-                drop_pending_updates=True
-            )
-        except Exception as e:
-            logger.error(f"Критическая ошибка: {e}")
-        finally:
-            await application.stop()
-            logger.info("Приложение остановлено корректно.")
+    try:
+        await application.start()
+        await application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=f"webhook/{TOKEN}",
+            webhook_url=webhook_url,
+            drop_pending_updates=True
+        )
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+    finally:
+        # Гарантированное завершение приложения
+        await application.shutdown()
+        await application.stop()
+        logger.info("Приложение остановлено корректно.")
 
 def main():
     """
