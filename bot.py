@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.2
-Last Updated: 2025-05-28 17:50
+Version: 1.0.3
+Last Updated: 2025-05-28 18:01
 Author: AlikAskat
 """
 
@@ -31,7 +31,7 @@ from google.api_core import retry
 import googleapiclient.errors
 
 # Версия бота
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -77,7 +77,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Привет! Я Calendar Bot v{__version__}")
 
 async def setup_webhook(app: Application, webhook_url: str) -> bool:
-    """Настройка webhook с обработкой ошибок"""
+    """
+    Настройка webhook с обработкой ошибок
+    """
     try:
         await app.bot.set_webhook(webhook_url)
         logger.info(f"Webhook успешно установлен на {webhook_url}")
@@ -87,7 +89,9 @@ async def setup_webhook(app: Application, webhook_url: str) -> bool:
         return False
 
 async def run_application():
-    """Запуск приложения"""
+    """
+    Запуск приложения
+    """
     # Инициализация приложения
     application = Application.builder().token(TOKEN).build()
     
@@ -121,7 +125,9 @@ async def run_application():
         await application.stop()
 
 def main():
-    """Основная функция"""
+    """
+    Основная функция
+    """
     logger.info(f"Запуск Calendar Bot v{__version__}")
     
     # Установка обработчиков сигналов
@@ -134,16 +140,11 @@ def main():
     health_thread.start()
     
     # Создание и запуск event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     try:
-        loop.run_until_complete(run_application())
+        asyncio.run(run_application())
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
         sys.exit(1)
-    finally:
-        loop.close()
 
 if __name__ == "__main__":
     main()
