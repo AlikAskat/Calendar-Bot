@@ -1,6 +1,7 @@
 """
 Calendar Bot
-Last Updated: 2025-05-28 19:20
+Version: 1.0.12
+Last Updated: 2025-05-28 19:41
 Author: AlikAskat
 """
 
@@ -9,6 +10,7 @@ import json
 import logging
 import asyncio
 import threading
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from dotenv import load_dotenv
@@ -16,7 +18,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Версия бота
-__version__ = '1.0.10'
+__version__ = '1.0.12'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования
