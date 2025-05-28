@@ -1,17 +1,16 @@
 """
 Calendar Bot
-Version: 1.0.10
 Last Updated: 2025-05-28 19:20
 Author: AlikAskat
 """
 
 import os
+import json
 import logging
-import signal
-import sys
 import asyncio
-import threading  # Импорт модуля threading
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -85,7 +84,6 @@ async def run_application():
 
     # Запуск webhook
     try:
-        await application.initialize()
         await application.start()
         await application.run_webhook(
             listen="0.0.0.0",
