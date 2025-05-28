@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.3
-Last Updated: 2025-05-28 18:01
+Version: 1.0.4
+Last Updated: 2025-05-28 18:12
 Author: AlikAskat
 """
 
@@ -31,7 +31,7 @@ from google.api_core import retry
 import googleapiclient.errors
 
 # Версия бота
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -66,7 +66,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 def run_health_check_server():
-    server = HTTPServer(('0.0.0.0', 8080), HealthCheckHandler)
+    port = int(os.environ.get("HEALTH_CHECK_PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
 
 def signal_handler(signum, frame):
@@ -78,15 +79,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def setup_webhook(app: Application, webhook_url: str) -> bool:
     """
-    Настройка webhook с обработкой ошибок
+    Настройка webhook с обработкой ошибок и повторными попытками
     """
-    try:
-        await app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook успешно установлен на {webhook_url}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка при установке webhook: {e}")
-        return False
+    for _ in range(3):  # Попытка до 3 раз
+        try:
+            await app.bot.set_webhook(webhook_url)
+            logger.info(f"Webhook успешно установлен на {webhook_url}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при установке webhook: {e}")
+    return False
 
 async def run_application():
     """
@@ -115,14 +117,18 @@ async def run_application():
     # Запуск webhook
     async with application:
         await application.start()
-        await application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=f"webhook/{TOKEN}",
-            webhook_url=webhook_url,
-            drop_pending_updates=True
-        )
-        await application.stop()
+        try:
+            await application.run_webhook(
+                listen="0.0.0.0",
+                port=port,
+                url_path=f"webhook/{TOKEN}",
+                webhook_url=webhook_url,
+                drop_pending_updates=True
+            )
+        except Exception as e:
+            logger.error(f"Критическая ошибка: {e}")
+        finally:
+            await application.stop()
 
 def main():
     """
@@ -139,7 +145,7 @@ def main():
     health_thread.daemon = True
     health_thread.start()
     
-    # Создание и запуск event loop
+    # Запуск приложения
     try:
         asyncio.run(run_application())
     except Exception as e:
