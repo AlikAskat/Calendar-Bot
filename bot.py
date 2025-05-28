@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.4q
-Last Updated: 2025-05-28 18:01
+Version: 1.0.5q
+Last Updated: 2025-05-28 18:38
 Author: AlikAskat
 """
 
@@ -27,7 +27,7 @@ from google.api_core import retry
 import googleapiclient.errors
 
 # Версия бота
-__version__ = '1.0.4q'
+__version__ = '1.0.5q'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -276,7 +276,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=get_main_keyboard()
         )
 
-async def main() -> None:
+def main() -> None:
     """Основная функция"""
     logger.info(f"Запуск Calendar Bot v{__version__}")
 
@@ -293,7 +293,7 @@ async def main() -> None:
 
     # Удаляем старый вебхук
     try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
+        asyncio.run(application.bot.delete_webhook(drop_pending_updates=True))
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
 
@@ -310,7 +310,7 @@ async def main() -> None:
     logger.info(f"Настройка вебхука: {webhook_url}")
     
     # Запускаем вебхук
-    await application.run_webhook(
+    application.run_webhook(
         listen="0.0.0.0",
         port=port,
         webhook_url=webhook_url,
@@ -318,4 +318,4 @@ async def main() -> None:
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
