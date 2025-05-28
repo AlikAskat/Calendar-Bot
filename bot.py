@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.4
-Last Updated: 2025-05-28 18:12
+Version: 1.0.5
+Last Updated: 2025-05-28 18:23
 Author: AlikAskat
 """
 
@@ -16,7 +16,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 import calendar
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -27,11 +27,10 @@ from telegram.ext import (
 )
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from google.api_core import retry
-import googleapiclient.errors
+from googleapiclient.errors import HttpError
 
 # Версия бота
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -94,7 +93,6 @@ async def run_application():
     """
     Запуск приложения
     """
-    # Инициализация приложения
     application = Application.builder().token(TOKEN).build()
     
     # Добавляем базовый обработчик
