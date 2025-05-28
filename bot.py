@@ -1,25 +1,22 @@
 """
 Calendar Bot
-Version: 1.0.8
-Last Updated: 2025-05-28 19:15
+Version: 1.0.9
+Last Updated: 2025-05-28 19:17
 Author: AlikAskat
 """
 
 import os
-import json
 import logging
 import signal
 import sys
 import asyncio
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Версия бота
-__version__ = '1.0.8'
+__version__ = '1.0.9'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования
@@ -42,11 +39,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = f"OK - Calendar Bot v{__version__}"
             self.wfile.write(response.encode('utf-8'))
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
 
 def run_health_check_server():
     port = int(os.environ.get("HEALTH_CHECK_PORT", 8080))
@@ -92,6 +84,7 @@ async def run_application():
 
     # Запуск webhook
     try:
+        await application.initialize()
         await application.start()
         await application.run_webhook(
             listen="0.0.0.0",
@@ -104,7 +97,6 @@ async def run_application():
         logger.error(f"Критическая ошибка: {e}")
     finally:
         # Гарантированное завершение приложения
-        await application.shutdown()
         await application.stop()
         logger.info("Приложение остановлено корректно.")
 
