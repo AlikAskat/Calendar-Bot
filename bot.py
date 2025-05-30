@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.13
-Last Updated: 2025-05-28 19:46
+Version: 1.0.14
+Last Updated: 2025-05-28 19:53
 Author: AlikAskat
 """
 
@@ -11,7 +11,7 @@ import logging
 import asyncio
 import threading
 import signal
-import sys  # Импорт sys для использования sys.exit()
+import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Версия бота
-__version__ = '1.0.13'
+__version__ = '1.0.14'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования
@@ -87,7 +87,7 @@ async def run_application():
 
     # Запуск webhook
     try:
-        await application.initialize()  # Инициализация приложения
+        await application.initialize()  # Убедитесь, что приложение корректно инициализировано
         await application.start()
         await application.run_webhook(
             listen="0.0.0.0",
@@ -103,6 +103,8 @@ async def run_application():
         if application.running:
             await application.stop()
             logger.info("Приложение остановлено корректно.")
+        else:
+            logger.warning("Попытка остановить неработающее приложение.")
 
 def main():
     """
