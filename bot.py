@@ -1,34 +1,28 @@
 """
 Calendar Bot
-Version: 1.0.14
-Last Updated: 2025-05-28 19:53
+Version: 1.0.15
+Last Updated: 2025-05-30 19:00
 Author: AlikAskat
 """
 
 import os
-import json
 import logging
-import asyncio
 import threading
 import signal
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Версия бота
-__version__ = '1.0.14'
+__version__ = '1.0.15'
 logger = logging.getLogger(__name__)
 
-# Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - [v" + __version__ + "] - %(name)s - %(levelname)s - %(message)s", 
+    format="%(asctime)s - [v" + __version__ + "] - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# Загрузка переменных окружения
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
@@ -55,78 +49,36 @@ def signal_handler(signum, frame):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Привет! Я Calendar Bot v{__version__}")
 
-async def setup_webhook(app: Application, webhook_url: str) -> bool:
-    try:
-        await app.bot.delete_webhook()  # Удаление старого вебхука
-        await app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook успешно установлен на {webhook_url}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка при установке webhook: {e}")
-        return False
+def main():
+    logger.info(f"Запуск Calendar Bot v{__version__}")
 
-async def run_application():
-    """
-    Запуск приложения с использованием asyncio.run()
-    """
+    # Обработчики сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Health-check server
+    health_thread = threading.Thread(target=run_health_check_server)
+    health_thread.daemon = True
+    health_thread.start()
+
     application = Application.builder().token(TOKEN).build()
-    
-    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
 
-    # Настройки вебхука
     port = int(os.environ.get("PORT", 10000))
     app_url = os.environ.get("RENDER_EXTERNAL_URL")
     if not app_url:
         logger.error("RENDER_EXTERNAL_URL не установлен")
-        return
+        sys.exit(1)
     webhook_url = f"{app_url}/webhook/{TOKEN}"
 
-    if not await setup_webhook(application, webhook_url):
-        return
-
-    # Запуск webhook
-    try:
-        await application.initialize()  # Убедитесь, что приложение корректно инициализировано
-        await application.start()
-        await application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=f"webhook/{TOKEN}",
-            webhook_url=webhook_url,
-            drop_pending_updates=True
-        )
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-    finally:
-        # Гарантированное завершение приложения
-        if application.running:
-            await application.stop()
-            logger.info("Приложение остановлено корректно.")
-        else:
-            logger.warning("Попытка остановить неработающее приложение.")
-
-def main():
-    """
-    Основная точка входа
-    """
-    logger.info(f"Запуск Calendar Bot v{__version__}")
-    
-    # Установка обработчиков сигналов
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    # Запуск сервера проверки здоровья
-    health_thread = threading.Thread(target=run_health_check_server)
-    health_thread.daemon = True
-    health_thread.start()
-    
-    # Запуск приложения
-    try:
-        asyncio.run(run_application())
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-        sys.exit(1)
+    # Webhook-запуск, без asyncio.run!
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=f"webhook/{TOKEN}",
+        webhook_url=webhook_url,
+        drop_pending_updates=True
+    )
 
 if __name__ == "__main__":
     main()
