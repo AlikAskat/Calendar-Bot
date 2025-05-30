@@ -1,6 +1,6 @@
 """
 Calendar Bot
-Version: 1.0.17q
+Version: 1.0.18q
 Last Updated: 2025-05-30
 Author: AlikAskat
 """
@@ -27,7 +27,7 @@ import googleapiclient.errors
 import asyncio
 
 # Версия бота
-__version__ = '1.0.17q'
+__version__ = '1.0.18q'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -45,7 +45,7 @@ if not TOKEN:
     raise ValueError("Переменная TELEGRAM_TOKEN не установлена!")
 
 # Глобальные переменные
-SCOPES = ['https://www.googleapis.com/auth/calendar']   # Убран лишний пробел
+SCOPES = ['https://www.googleapis.com/auth/calendar'] 
 TIMEZONE = 'Asia/Yekaterinburg'
 user_states = {}
 user_data = {}
@@ -61,23 +61,20 @@ def get_google_calendar_service():
             json.loads(GOOGLE_CREDENTIALS_JSON),
             scopes=SCOPES
         )
+        # Делегируйте доступ к календарю пользователя
+        credentials = credentials.with_subject("ваш-почтовый-адрес@example.com")  # Email владельца календаря
         return build('calendar', 'v3', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка при получении сервиса календаря: {e}")
         return None
 
-def create_calendar_keyboard(year, month):
+def create_calendar_keyboard(year: int, month: int):
     """Создает клавиатуру-календарь"""
-    month_names = [
-        'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
-        'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
-    ]
-    keyboard = [
-        [InlineKeyboardButton(f"{month_names[month-1].capitalize()} {year}", callback_data="ignore")]
-    ]
-    # Дни недели
+    keyboard = []
+    month_names = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 
+                  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+    keyboard.append([InlineKeyboardButton(f"{month_names[month-1].capitalize()} {year}", callback_data="ignore")])
     keyboard.append([InlineKeyboardButton(d, callback_data="ignore") for d in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
-    # Календарь
     for week in calendar.Calendar().monthdayscalendar(year, month):
         row = []
         for day in week:
@@ -86,17 +83,15 @@ def create_calendar_keyboard(year, month):
             else:
                 row.append(InlineKeyboardButton(str(day), callback_data=f"day:{year}-{month}-{day}"))
         keyboard.append(row)
-    # Навигация
+    nav_row = []
     prev_month = month - 1 if month > 1 else 12
     next_month = month + 1 if month < 12 else 1
     prev_year = year if month > 1 else year - 1
     next_year = year if month < 12 else year + 1
-
-    keyboard.append([
-        InlineKeyboardButton("⬅️", callback_data=f"prev:{prev_year}:{prev_month}"),
-        InlineKeyboardButton("Отмена", callback_data="cancel"),
-        InlineKeyboardButton("➡️", callback_data=f"next:{next_year}:{next_month}")
-    ])
+    nav_row.append(InlineKeyboardButton("⬅️", callback_data=f"prev:{prev_year}:{prev_month}"))
+    nav_row.append(InlineKeyboardButton("Отмена", callback_data="cancel"))
+    nav_row.append(InlineKeyboardButton("➡️", callback_data=f"next:{next_year}:{next_month}"))
+    keyboard.append(nav_row)
     return InlineKeyboardMarkup(keyboard)
 
 def create_time_keyboard():
@@ -145,6 +140,9 @@ def add_event_to_calendar(title: str, start_time: datetime) -> str:
         }
         event = service.events().insert(calendarId='primary', body=event).execute()
         return f"https://calendar.google.com/calendar/event?eid={event['id']}"
+    except googleapiclient.errors.HttpError as e:
+        logger.error(f"Ошибка Google Calendar API: {e}")
+        return ""
     except Exception as e:
         logger.error(f"Непредвиденная ошибка: {e}")
         return ""
@@ -167,7 +165,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "➕ *Добавить задачу* - создание новой задачи:\n"
         "   1. Введите название задачи\n"
         "   2. Выберите дату в календаре\n"
-        "   3. Введите время\n"
+        "   3. Выберите время\n"
         "   4. Получите ссылку на событие в Google Calendar\n"
         "🔄 *Перезапуск* - очистка чата и перезапуск бота\n"
         "❓ *Помощь* - показать это сообщение\n"
@@ -245,17 +243,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик callback запросов"""
     query = update.callback_query
-    user_id = query.from_user.id
     await query.answer()
+    user_id = query.from_user.id
 
     if query.data.startswith("day:"):
-        _, year, month, day = query.data.split(":")
+        data_parts = query.data.split(":")
+        if len(data_parts) < 4:
+            logger.error(f"Некорректный callback_data: {query.data}")
+            return
+        _, year, month, day = data_parts
         selected_date = datetime(int(year), int(month), int(day))
         user_data[user_id]["date"] = selected_date
         user_states[user_id] = "awaiting_time"
         await query.message.reply_text("🕒 Введите время в формате ЧЧ:ММ:")
     elif query.data.startswith("prev:") or query.data.startswith("next:"):
-        _, year, month = query.data.split(":")
+        data_parts = query.data.split(":")
+        if len(data_parts) < 3:
+            logger.error(f"Некорректный callback_data: {query.data}")
+            return
+        _, year, month = data_parts
         user_states[user_id] = "awaiting_date"
         user_data[user_id]["year"] = int(year)
         user_data[user_id]["month"] = int(month)
@@ -268,7 +274,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def show_calendar(user_id: int, year: int, month: int, context):
     """Отображает календарь"""
     markup = create_calendar_keyboard(year, month)
-    month_name = RU_MONTHS[month - 1].capitalize()
+    month_name = {1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель", 5: "Май", 6: "Июнь", 
+                  7: "Июль", 8: "Август", 9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"}[month]
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
 
     if 'calendar_message_id' in user_data.get(user_id, {}):
@@ -290,7 +297,7 @@ async def show_calendar(user_id: int, year: int, month: int, context):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик ошибок"""
     logger.error(f"Update {update} caused error {context.error}")
-    if update.effective_message:
+    if update and update.effective_message:
         await update.effective_message.reply_text(
             "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите 'Перезапуск'.",
             reply_markup=get_main_keyboard()
@@ -311,8 +318,25 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_error_handler(error_handler)
 
-    # Запускаем бота
-    application.run_polling()
+    # Настройки для вебхука
+    domain = os.getenv("RENDER_EXTERNAL_URL")
+    if not domain:
+        logger.error("RENDER_EXTERNAL_URL не установлен")
+        return
+
+    port = int(os.getenv("PORT", 10000))
+    webhook_url = f"{domain}/webhook/{TOKEN}"
+
+    logger.info(f"Настройка вебхука: {webhook_url}")
+    
+    # Запускаем вебхук
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path="/webhook",
+        webhook_url=webhook_url,
+        drop_pending_updates=True
+    )
 
 if __name__ == "__main__":
     main()
