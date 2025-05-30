@@ -1,230 +1,318 @@
+"""
+Calendar Bot
+Version: 1.0.17q
+Last Updated: 2025-05-30
+Author: AlikAskat
+"""
+
 import os
-import pickle
-import locale
-from datetime import datetime, timedelta
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from dotenv import load_dotenv
-import calendar
+import json
 import logging
-
-load_dotenv()
-
-try:
-    locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
-except locale.Error:
-    pass
-
-# Русские названия месяцев
-RU_MONTHS = [
-    "январь", "февраль", "март", "апрель", "май", "июнь",
-    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"
-]
-
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from datetime import datetime, timedelta
+import calendar
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
 )
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from google.api_core import retry
+import googleapiclient.errors
+import asyncio
+
+# Версия бота
+__version__ = '1.0.17q'
 logger = logging.getLogger(__name__)
 
-# Правильный список прав (SCOPES)
-SCOPES = ['https://www.googleapis.com/auth/calendar ']
+# Настройка логирования с информацией о версии
+logging.basicConfig(
+    format="%(asctime)s - [v" + __version__ + "] - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS")
+
+if not TOKEN:
+    raise ValueError("Переменная TELEGRAM_TOKEN не установлена!")
+
+# Глобальные переменные
+SCOPES = ['https://www.googleapis.com/auth/calendar']   # Убран лишний пробел
+TIMEZONE = 'Asia/Yekaterinburg'
+user_states = {}
 user_data = {}
 
-def get_calendar_service():
-    logger.info("Запуск функции получения сервиса Google Calendar")
-    if not os.path.exists('credentials.json'):
-        raise FileNotFoundError("credentials.json не найден. Загрузите его из Google Cloud Console.")
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            logger.info("Обновление токена...")
-            try:
-                creds.refresh(Request())
-            except Exception as e:
-                logger.error(f"Ошибка при обновлении токена: {e}")
-                raise
-        else:
-            logger.info("Запуск flow.run_local_server()")
-            try:
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-            except Exception as e:
-                logger.error(f"Ошибка при получении токена: {e}")
-                raise
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
-    return build('calendar', 'v3', credentials=creds)
-
-def add_event_to_calendar(summary, start_time, end_time):
-    logger.info("Добавление события в календарь")
+def get_google_calendar_service():
+    """Получение сервиса Google Calendar с использованием Service Account"""
     try:
-        service = get_calendar_service()
-        event = {
-            'summary': summary,
-            'start': {'dateTime': start_time.isoformat(), 'timeZone': 'Asia/Yekaterinburg'},
-            'end': {'dateTime': end_time.isoformat(), 'timeZone': 'Asia/Yekaterinburg'}
-        }
-        created_event = service.events().insert(calendarId='primary', body=event).execute()
-        return created_event.get('htmlLink')
+        if not GOOGLE_CREDENTIALS_JSON:
+            logger.error("Переменная GOOGLE_CREDENTIALS не установлена")
+            return None
+
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(GOOGLE_CREDENTIALS_JSON),
+            scopes=SCOPES
+        )
+        return build('calendar', 'v3', credentials=credentials)
     except Exception as e:
-        logger.error(f"Ошибка при добавлении события: {e}")
-        raise
+        logger.error(f"Ошибка при получении сервиса календаря: {e}")
+        return None
 
-async def start(update: Update, context) -> None:
-    keyboard = [["Добавить задачу", "Помощь", "Перезапустить"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-    await update.message.reply_text(
-        'Привет! Выберите действие:',
-        reply_markup=reply_markup
-    )
-
-async def restart(update: Update, context) -> None:
-    chat_id = update.effective_chat.id
-    user_data[chat_id] = {}
-    await start(update, context)
-
-async def help_command(update: Update, context) -> None:
-    await update.message.reply_text("Чтобы добавить задачу, выберите \"Добавить задачу\" и следуйте инструкциям.")
-
-async def handle_message(update: Update, context) -> None:
-    text = update.message.text.strip().lower()
-    chat_id = update.effective_chat.id
-
-    if text == "добавить задачу":
-        user_data[chat_id] = {'state': 'awaiting_task'}
-        await update.message.reply_text("Введите название задачи:")
-    elif user_data.get(chat_id, {}).get('state') == 'awaiting_task':
-        user_data[chat_id]['task'] = text
-        user_data[chat_id]['state'] = 'selecting_date'
-        today = datetime.today()
-        user_data[chat_id]['year'] = today.year
-        user_data[chat_id]['month'] = today.month
-        await show_calendar(chat_id, today.year, today.month, context)
-    elif user_data.get(chat_id, {}).get('state') == 'selecting_time':
-        try:
-            hour, minute = map(int, text.split(":"))
-            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                selected_date = user_data[chat_id]['date']
-                task = user_data[chat_id]['task']
-                start_datetime = selected_date.replace(hour=hour, minute=minute)
-                end_datetime = start_datetime + timedelta(minutes=30)
-                event_link = add_event_to_calendar(task, start_datetime, end_datetime)
-                await update.message.reply_text(f"✅ Задача добавлена! Ссылка: {event_link}")
-                user_data.pop(chat_id)
-            else:
-                await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
-        except ValueError:
-            await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
-    elif text == "помощь":
-        await help_command(update, context)
-    elif text == "перезапустить":
-        await restart(update, context)
-    else:
-        await update.message.reply_text("❌ Неизвестная команда. Используйте кнопки меню.")
-
-def build_calendar(year, month):
-    markup = []
-    cal = calendar.Calendar()
-    
+def create_calendar_keyboard(year, month):
+    """Создает клавиатуру-календарь"""
+    month_names = [
+        'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+        'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
+    ]
+    keyboard = [
+        [InlineKeyboardButton(f"{month_names[month-1].capitalize()} {year}", callback_data="ignore")]
+    ]
     # Дни недели
-    markup.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
-
-    # Дни месяца
-    for week in cal.monthdayscalendar(year, month):
+    keyboard.append([InlineKeyboardButton(d, callback_data="ignore") for d in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
+    # Календарь
+    for week in calendar.Calendar().monthdayscalendar(year, month):
         row = []
         for day in week:
             if day == 0:
                 row.append(InlineKeyboardButton(" ", callback_data="ignore"))
             else:
                 row.append(InlineKeyboardButton(str(day), callback_data=f"day:{year}-{month}-{day}"))
-        markup.append(row)
-
+        keyboard.append(row)
     # Навигация
-    month_name = RU_MONTHS[month - 1].capitalize()
-    markup.append([
-        InlineKeyboardButton("⬅️", callback_data=f"prev:{year}:{month}"),
-        InlineKeyboardButton(f"{month_name} {year}", callback_data="ignore"),
-        InlineKeyboardButton("➡️", callback_data=f"next:{year}:{month}")
+    prev_month = month - 1 if month > 1 else 12
+    next_month = month + 1 if month < 12 else 1
+    prev_year = year if month > 1 else year - 1
+    next_year = year if month < 12 else year + 1
+
+    keyboard.append([
+        InlineKeyboardButton("⬅️", callback_data=f"prev:{prev_year}:{prev_month}"),
+        InlineKeyboardButton("Отмена", callback_data="cancel"),
+        InlineKeyboardButton("➡️", callback_data=f"next:{next_year}:{next_month}")
     ])
-    return InlineKeyboardMarkup(markup)
+    return InlineKeyboardMarkup(keyboard)
 
-async def handle_callback(update: Update, context) -> None:
+def create_time_keyboard():
+    """Создает клавиатуру для выбора времени"""
+    hours = [f"{h:02d}" for h in range(24)]
+    minutes = [f"{m:02d}" for m in range(0, 60, 5)]
+
+    hour_markup = []
+    for i in range(0, 24, 8):  # 3x8 сетка
+        hour_markup.append(
+            [InlineKeyboardButton(h, callback_data=f"time_{h}") for h in hours[i:i+8]]
+        )
+
+    minute_markup = []
+    for i in range(0, 60, 20):  # 3x4 сетка
+        minute_markup.append(
+            [InlineKeyboardButton(m, callback_data=f"time_{m}") for m in minutes[i:i+20]]
+        )
+
+    return InlineKeyboardMarkup(hour_markup + minute_markup)
+
+def get_main_keyboard():
+    """Создает основную клавиатуру"""
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("Добавить задачу")],
+        [KeyboardButton("Помощь"), KeyboardButton("Перезапуск")]
+    ], resize_keyboard=True)
+
+@retry.Retry(predicate=retry.if_transient_error)
+def add_event_to_calendar(title: str, start_time: datetime) -> str:
+    """Добавляет событие в Google Calendar с поддержкой повторных попыток"""
+    try:
+        service = get_google_calendar_service()
+        if not service:
+            return ""
+        event = {
+            'summary': title,
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': TIMEZONE,
+            },
+            'end': {
+                'dateTime': (start_time + timedelta(hours=1)).isoformat(),
+                'timeZone': TIMEZONE,
+            },
+        }
+        event = service.events().insert(calendarId='primary', body=event).execute()
+        return f"https://calendar.google.com/calendar/event?eid={event['id']}"
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка: {e}")
+        return ""
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /start"""
+    user = update.effective_user
+    user_states[user.id] = "main_menu"
+    await update.message.reply_text(
+        f"Привет, {user.first_name}! 👋\n"
+        "Я помогу вам управлять задачами в календаре.\n"
+        "Нажмите 'Добавить задачу' чтобы начать, или 'Помощь' для получения справки.",
+        reply_markup=get_main_keyboard()
+    )
+
+async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает справку по командам"""
+    help_text = (
+        "📝 *Справка по командам:*\n"
+        "➕ *Добавить задачу* - создание новой задачи:\n"
+        "   1. Введите название задачи\n"
+        "   2. Выберите дату в календаре\n"
+        "   3. Введите время\n"
+        "   4. Получите ссылку на событие в Google Calendar\n"
+        "🔄 *Перезапуск* - очистка чата и перезапуск бота\n"
+        "❓ *Помощь* - показать это сообщение\n"
+        "Чтобы начать, нажмите 'Добавить задачу'"
+    )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Очищает чат и перезапускает бота"""
+    user_id = update.effective_user.id
+    user_states[user_id] = "main_menu"
+    user_data[user_id] = {}
+    await update.message.reply_text(
+        "🔄 Бот перезапущен!\n"
+        "Все данные очищены. Можно начать заново:",
+        reply_markup=get_main_keyboard()
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик текстовых сообщений"""
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    state = user_states.get(user_id, "main_menu")
+
+    if text == "Добавить задачу":
+        user_states[user_id] = "awaiting_title"
+        await update.message.reply_text("Введите название задачи:")
+        return
+    elif state == "awaiting_title":
+        user_data[user_id] = {"title": text}
+        now = datetime.now()
+        user_states[user_id] = "awaiting_date"
+        await update.message.reply_text(
+            f"Задача: {text}\nТеперь выберите дату в календаре:",
+            reply_markup=create_calendar_keyboard(now.year, now.month)
+        )
+    elif state == "awaiting_time":
+        try:
+            hour, minute = map(int, text.split(":"))
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                selected_date = user_data[user_id]["date"]
+                start_time = selected_date.replace(hour=hour, minute=minute)
+                calendar_url = add_event_to_calendar(user_data[user_id]["title"], start_time)
+
+                if calendar_url:
+                    await update.message.reply_text(
+                        f"✅ Задача успешно добавлена!\n"
+                        f"📝 {user_data[user_id]['title']}\n"
+                        f"📅 {start_time.strftime('%d.%m.%Y %H:%M')}\n"
+                        f"🔗 Посмотреть в календаре: {calendar_url}",
+                        reply_markup=get_main_keyboard()
+                    )
+                else:
+                    await update.message.reply_text(
+                        "❌ Произошла ошибка при добавлении задачи в календарь.\n"
+                        "Попробуйте еще раз:",
+                        reply_markup=get_main_keyboard()
+                    )
+                user_states[user_id] = "main_menu"
+                user_data[user_id] = {}
+            else:
+                await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
+        except ValueError:
+            await update.message.reply_text("🕒 Неверный формат времени. Введите в формате ЧЧ:ММ.")
+    elif text == "Помощь":
+        await show_help(update, context)
+    elif text == "Перезапуск":
+        await restart(update, context)
+    else:
+        await update.message.reply_text(
+            "Используйте кнопки меню для навигации или нажмите 'Помощь' для получения справки:",
+            reply_markup=get_main_keyboard()
+        )
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик callback запросов"""
     query = update.callback_query
+    user_id = query.from_user.id
     await query.answer()
-    chat_id = query.message.chat_id
-    data = query.data
 
-    if data.startswith("day:"):
-        _, date_str = data.split(":")
-        y, m, d = map(int, date_str.split("-"))
-        selected_date = datetime(y, m, d)
-        user_data[chat_id]['date'] = selected_date
-        user_data[chat_id]['state'] = 'selecting_time'
+    if query.data.startswith("day:"):
+        _, year, month, day = query.data.split(":")
+        selected_date = datetime(int(year), int(month), int(day))
+        user_data[user_id]["date"] = selected_date
+        user_states[user_id] = "awaiting_time"
         await query.message.reply_text("🕒 Введите время в формате ЧЧ:ММ:")
-    elif data.startswith("prev:") or data.startswith("next:"):
-        _, y, m = data.split(":")
-        year, month = int(y), int(m)
-        if data.startswith("prev:"):
-            month -= 1
-            if month < 1:
-                month = 12
-                year -= 1
-        else:
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-        user_data[chat_id]['year'] = year
-        user_data[chat_id]['month'] = month
-        await show_calendar(chat_id, year, month, context)
+    elif query.data.startswith("prev:") or query.data.startswith("next:"):
+        _, year, month = query.data.split(":")
+        user_states[user_id] = "awaiting_date"
+        user_data[user_id]["year"] = int(year)
+        user_data[user_id]["month"] = int(month)
+        await show_calendar(user_id, int(year), int(month), context)
+    elif query.data == "cancel":
+        await query.message.reply_text("Действие отменено. Используйте кнопки меню:", reply_markup=get_main_keyboard())
+        user_states[user_id] = "main_menu"
+        user_data[user_id] = {}
 
-async def show_calendar(chat_id: int, year: int, month: int, context):
-    markup = build_calendar(year, month)
+async def show_calendar(user_id: int, year: int, month: int, context):
+    """Отображает календарь"""
+    markup = create_calendar_keyboard(year, month)
     month_name = RU_MONTHS[month - 1].capitalize()
     message_text = f"📅 Календарь:\nВыберите дату:\n\n{month_name} {year}"
 
-    if 'calendar_message_id' in user_data.get(chat_id, {}):
-        # Редактируем старое сообщение
+    if 'calendar_message_id' in user_data.get(user_id, {}):
         await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=user_data[chat_id]['calendar_message_id'],
+            chat_id=user_id,
+            message_id=user_data[user_id]['calendar_message_id'],
             text=message_text,
             reply_markup=markup
         )
     else:
-        # Первый запуск — отправляем новое сообщение
         message = await context.bot.send_message(
-            chat_id=chat_id,
+            chat_id=user_id,
             text=message_text,
             reply_markup=markup
         )
-        user_data[chat_id]['calendar_message_id'] = message.message_id
+        user_data[user_id]['calendar_message_id'] = message.message_id
+        user_states[user_id] = "awaiting_date"
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик ошибок"""
+    logger.error(f"Update {update} caused error {context.error}")
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите 'Перезапуск'.",
+            reply_markup=get_main_keyboard()
+        )
 
 def main() -> None:
-    logger.info("Запуск бота")
-    token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        logger.error("Переменная TELEGRAM_TOKEN не найдена в .env")
-        return
+    """Основная функция"""
+    logger.info(f"Запуск Calendar Bot v{__version__}")
 
-    application = Application.builder().token(token).build()
+    # Создаем приложение 
+    application = Application.builder().token(TOKEN).build()
+
+    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("help", show_help))
     application.add_handler(CommandHandler("restart", restart))
-    application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_error_handler(error_handler)
 
+    # Запускаем бота
     application.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
