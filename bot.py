@@ -1,7 +1,7 @@
 """
 Calendar Bot
-Version: 1.0.19q
-Last Updated: 2025-05-30 17:58
+Version: 1.0.20q
+Last Updated: 2025-05-30 18:12
 Author: AlikAskat
 """
 
@@ -27,7 +27,7 @@ import googleapiclient.errors
 import asyncio
 
 # Версия бота
-__version__ = '1.0.19q'
+__version__ = '1.0.20q'
 logger = logging.getLogger(__name__)
 
 # Настройка логирования с информацией о версии
@@ -60,9 +60,7 @@ def get_google_calendar_service():
         credentials = service_account.Credentials.from_service_account_info(
             json.loads(GOOGLE_CREDENTIALS_JSON),
             scopes=SCOPES
-        )
-        # Делегирование доступа к календарю пользователя
-        credentials = credentials.with_subject("ваш-почтовый-адрес@example.com")
+        ).with_subject("ваш-почтовый-адрес@example.com")  # Делегирование доступа
         return build('calendar', 'v3', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка при получении сервиса календаря: {e}")
@@ -71,9 +69,9 @@ def get_google_calendar_service():
 def create_calendar_keyboard(year: int, month: int):
     """Создает клавиатуру-календарь"""
     keyboard = []
-    month_names = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 
-                  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
-    keyboard.append([InlineKeyboardButton(f"{month_names[month-1].capitalize()} {year}", callback_data="ignore")])
+    month_names = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+    keyboard.append([InlineKeyboardButton(f"{month_names[month-1]} {year}", callback_data="ignore")])
     keyboard.append([InlineKeyboardButton(d, callback_data="ignore") for d in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]])
     for week in calendar.Calendar().monthdayscalendar(year, month):
         row = []
@@ -148,18 +146,14 @@ def add_event_to_calendar(title: str, start_time: datetime) -> str:
         return ""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /start"""
-    user = update.effective_user
-    user_states[user.id] = "main_menu"
     await update.message.reply_text(
-        f"Привет, {user.first_name}! 👋\n"
+        f"Привет, {update.effective_user.first_name}! 👋\n"
         "Я помогу вам управлять задачами в календаре.\n"
         "Нажмите 'Добавить задачу' чтобы начать, или 'Помощь' для получения справки.",
         reply_markup=get_main_keyboard()
     )
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Показывает справку по командам"""
     help_text = (
         "📝 *Справка по командам:*\n"
         "➕ *Добавить задачу* - создание новой задачи:\n"
@@ -174,7 +168,6 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Очищает чат и перезапускает бота"""
     user_id = update.effective_user.id
     user_states[user_id] = "main_menu"
     user_data[user_id] = {}
@@ -185,7 +178,6 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик текстовых сообщений"""
     text = update.message.text.strip()
     user_id = update.effective_user.id
     state = user_states.get(user_id, "main_menu")
@@ -241,7 +233,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик callback запросов"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -264,7 +255,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user_data[user_id] = {}
 
 async def show_calendar(user_id: int, year: int, month: int, context):
-    """Отображает календарь"""
     markup = create_calendar_keyboard(year, month)
     month_name = {1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель", 5: "Май", 6: "Июнь", 
                   7: "Июль", 8: "Август", 9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"}[month]
@@ -287,15 +277,14 @@ async def show_calendar(user_id: int, year: int, month: int, context):
         user_states[user_id] = "awaiting_date"
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик ошибок"""
     logger.error(f"Update {update} caused error {context.error}")
-    if update is not None and update.effective_message:
+    if update and update.effective_message:
         await update.effective_message.reply_text(
             "Произошла ошибка. Пожалуйста, попробуйте позже или нажмите 'Перезапуск'.",
             reply_markup=get_main_keyboard()
         )
 
-def main() -> None:
+async def main() -> None:
     """Основная функция"""
     logger.info(f"Запуск Calendar Bot v{__version__}")
 
@@ -312,7 +301,7 @@ def main() -> None:
 
     # Удаляем старый вебхук
     try:
-        asyncio.run(application.bot.delete_webhook(drop_pending_updates=True))
+        await application.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
         logger.warning(f"Ошибка при удалении вебхука: {e}")
 
@@ -329,7 +318,7 @@ def main() -> None:
     logger.info(f"Настройка вебхука: {webhook_url}")
     
     # Запускаем вебхук
-    application.run_webhook(
+    await application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path="/webhook",
@@ -338,4 +327,5 @@ def main() -> None:
     )
 
 if __name__ == "__main__":
-    main()
+    # Запускаем событийный цикл
+    asyncio.run(main())
